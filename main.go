@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"github.com/pion/rtp"
 	"math/rand"
 	"os"
 	"strconv"
 	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_proxy"
+	"vrt/ws/ws_client"
+	"vrt/ws/ws_server"
 )
 
 func main() {
@@ -36,6 +39,41 @@ func main() {
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
+	}
+
+	wsServer := ws_server.Create()
+	err = wsServer.Start("", 6060)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	//pathExp := regexp.MustCompile("^\\/.+\\/")
+	//fileDir := pathExp.FindString(os.Args[0])
+	//filePath := fileDir + "a.mp4"
+	//
+	//os.Create(filePath)
+	//f, err := os.OpenFile(filePath, os.O_WRONLY, os.ModePerm)
+	//if err != nil {
+	//	logger.Error(err.Error())
+	//}
+
+	wsServer.Callback = func(client *ws_client.WSClient) {
+		client.SetCallback(func(client *ws_client.WSClient) {
+			rtspProxy.UnsubscribeFromRtpBuff(client.SessionId)
+		})
+		rtspProxy.SubscribeToRtpBuff(client.SessionId, func(bytes []byte) {
+			p := rtp.Packet{}
+			err := p.Unmarshal(bytes)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+
+			//_, err = f.Write(p.Payload)
+			//if err != nil {
+			//	logger.Error(err.Error())
+			//}
+			//client.Send(websocket.BinaryMessage, p.Payload)
+		})
 	}
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки

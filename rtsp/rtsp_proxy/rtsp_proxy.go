@@ -7,17 +7,20 @@ import (
 	"vrt/rtsp/rtsp_server"
 )
 
+type RtpSubscriber func([]byte)
+
 type RtspProxy struct {
-	RtspClient *rtsp_client.RtspClient
-	RtspServer *rtsp_server.RtspServer
-	IsRunning  bool
+	RtspClient     *rtsp_client.RtspClient
+	RtspServer     *rtsp_server.RtspServer
+	IsRunning      bool
+	RtpSubscribers map[int64]RtpSubscriber
 }
 
 func Create() RtspProxy {
 	client := rtsp_client.Create()
 	server := rtsp_server.Create()
 
-	proxy := RtspProxy{RtspClient: &client, RtspServer: &server}
+	proxy := RtspProxy{RtspClient: &client, RtspServer: &server, RtpSubscribers: map[int64]RtpSubscriber{}}
 
 	return proxy
 }
@@ -83,6 +86,14 @@ func (proxy *RtspProxy) Stop() error {
 	return err
 }
 
+func (proxy *RtspProxy) SubscribeToRtpBuff(uid int64, subscriber RtpSubscriber) {
+	proxy.RtpSubscribers[uid] = subscriber
+}
+
+func (proxy *RtspProxy) UnsubscribeFromRtpBuff(uid int64) {
+	delete(proxy.RtpSubscribers, uid)
+}
+
 func (proxy *RtspProxy) run() {
 	rtspServer := proxy.RtspServer
 	rtspClient := proxy.RtspClient
@@ -114,6 +125,10 @@ func (proxy *RtspProxy) run() {
 
 					recvRtpBuff = recvRtpBuff[:0]
 				}
+			}
+
+			for _, subscriber := range proxy.RtpSubscribers {
+				subscriber(lockedBuff)
 			}
 
 			lockedBuff = lockedBuff[:0]
