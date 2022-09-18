@@ -1,0 +1,14 @@
+.app{
+    display: flex;
+    flex-direction: row;
+}
+.log{
+    display: flex;
+    flex-direction: column;
+    width: 50%;
+}
+.log-line{
+    display: flex;
+    flex-direction: row;
+    border: 1px solid black;
+}

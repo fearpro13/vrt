@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="description" content="jMuxer - a simple javascript mp4 muxer for non-standard streaming communications protocol">
+    <meta name="keywords" content="h264 player, mp4 player, mse, mp4 muxing, jmuxer, aac player">
+    <title>JMuxer demo</title>
+    <script async defer src="https://buttons.github.io/buttons.js"></script>
+    <style type="text/css">
+        .github-tools {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+        }
+        a.h264-player {
+            font-size: 20px;
+            text-decoration: none;
+            color: #07568e;
+            margin-top: 10px;
+            display: block;
+        }
+        .gesture {
+            font-size: 15px;
+            color: #ad4903;
+            margin-top: 10px;
+        }
+</style>
+</head>
+<body>
+
+<h2>jMuxer Demo</h2>
+<p>Sample demo node server is running on heroku free hosting</p>
+<br /><br />
+<div class="github-tools">
+<a class="github-button" href="https://github.com/samirkumardas/jmuxer/fork" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-size="large" data-show-count="true" aria-label="Fork samirkumardas/jmuxer on GitHub">Fork</a>
+<!-- Place this tag where you want the button to render. -->
+<a class="github-button" href="https://github.com/samirkumardas/jmuxer" data-color-scheme="no-preference: dark; light: dark; dark: dark;" data-size="large" data-show-count="true" aria-label="Star samirkumardas/jmuxer on GitHub">Star</a>
+</div>
+
+<div id="container" style="width: 600px; margin: 0 auto;">
+    <video width="100%" controls autoplay poster="images/loader-thumb.jpg" id="player"></video>
+    <div class="gesture">If it does not play automatically, Click the `video play button` to initiate the video</div>
+    <a class="h264-player" href="https://samirkumardas.github.io/jmuxer/h264_player.html">Play a h264 file online</a>
+</div>
+
+<script>
+
+  function parse(data) {
+      var input = new Uint8Array(data),
+          dv = new DataView(input.buffer),
+          duration,
+          audioLength,
+          audio,
+          video;
+
+      duration = dv.getUint16(0, true);
+      audioLength = dv.getUint16(2, true);
+      audio = input.subarray(4, (audioLength + 4));
+      video = input.subarray(audioLength + 4);
+
+      return {
+        audio: audio,
+        video: video,
+        duration: duration
+      };
+ }
+
+ window.onload = function() {
+    var socketURL = 'wss://jmuxer-demo-server.herokuapp.com';
+    var jmuxer = new JMuxer({
+        node: 'player',
+        debug: true
+     });
+
+     var ws = new WebSocket(socketURL);
+     ws.binaryType = 'arraybuffer';
+     ws.addEventListener('message',function(event) {
+          var data = parse(event.data);
+          jmuxer.feed(data);
+     });
+ }   
+</script>
+<script type="text/javascript" src="jmuxer.min.js"></script>
+</body>
+</html>

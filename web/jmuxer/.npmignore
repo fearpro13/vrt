@@ -1,0 +1,7 @@
+node_modules
+example
+docs
+.eslintrc.json
+.eslintignore
+.babelrc
+.travis.yml
