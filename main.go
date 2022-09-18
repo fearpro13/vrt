@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 	"vrt/logger"
+	"vrt/rtsp/rtsp_proxy"
 )
 
 func main() {
@@ -27,15 +28,15 @@ func main() {
 		logLevelInt := int(logLevelInt4)
 		logger.SetLogLevel(logLevelInt)
 	}
-	
-	//address := os.Args[1]
-	//
-	//rtspProxy := rtsp_proxy.Create()
-	//err := rtspProxy.Start(address, 0)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//	os.Exit(1)
-	//}
+
+	address := os.Args[1]
+
+	rtspProxy := rtsp_proxy.Create()
+	err := rtspProxy.Start(address, 0)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки
 	select {}
