@@ -5,11 +5,9 @@ Video re-transmitter
 RTSP proxy + Rtsp to WebSocket
 
 # Cборка
-#### go build < buildDir >
+#### go build < buildOutputDir >
 
 # Запуск
-#### Пример запуска с уровнем логирования INFO
-#### vrt rtsp://rtsp://username:password@127.0.0.1:554/?trackID=1 2
 ## Программа запускается с 2-мя аргументами
 
 ## 1 - адрес удалённого rtsp сервера
@@ -23,3 +21,6 @@ RTSP proxy + Rtsp to WebSocket
     ERR 5
     CRITICAL 6
     EMERGENCY 7
+
+#### Пример запуска с уровнем логирования INFO
+#### vrt rtsp://username:password@127.0.0.1:554/?trackID=1 2

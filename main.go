@@ -2,9 +2,12 @@ package main
 
 import (
 	"fmt"
+	"github.com/gorilla/websocket"
 	"github.com/pion/rtp"
+	"github.com/pion/rtp/codecs"
 	"math/rand"
 	"os"
+	"regexp"
 	"strconv"
 	"time"
 	"vrt/logger"
@@ -47,15 +50,15 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	//pathExp := regexp.MustCompile("^\\/.+\\/")
-	//fileDir := pathExp.FindString(os.Args[0])
-	//filePath := fileDir + "a.mp4"
-	//
-	//os.Create(filePath)
-	//f, err := os.OpenFile(filePath, os.O_WRONLY, os.ModePerm)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
+	pathExp := regexp.MustCompile("^\\/.+\\/")
+	fileDir := pathExp.FindString(os.Args[0])
+	filePath := fileDir + "a.mp4"
+
+	os.Create(filePath)
+	f, err := os.OpenFile(filePath, os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 
 	wsServer.Callback = func(client *ws_client.WSClient) {
 		client.SetCallback(func(client *ws_client.WSClient) {
@@ -68,11 +71,14 @@ func main() {
 				logger.Error(err.Error())
 			}
 
-			//_, err = f.Write(p.Payload)
-			//if err != nil {
-			//	logger.Error(err.Error())
-			//}
-			//client.Send(websocket.BinaryMessage, p.Payload)
+			h := codecs.H264Packet{}
+			hRaw, err := h.Unmarshal(p.Payload)
+
+			_, err = f.Write(p.Payload)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+			client.Send(websocket.BinaryMessage, hRaw)
 		})
 	}
 
