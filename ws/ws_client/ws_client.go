@@ -22,7 +22,8 @@ type WSClient struct {
 }
 
 func Create() *WSClient {
-	client := &WSClient{SessionId: rand.Int63()}
+	buff := make(chan []byte, 2048)
+	client := &WSClient{SessionId: rand.Int63(), RecvBuff: buff}
 
 	return client
 }

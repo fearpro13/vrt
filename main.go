@@ -52,10 +52,16 @@ func main() {
 
 	pathExp := regexp.MustCompile("^\\/.+\\/")
 	fileDir := pathExp.FindString(os.Args[0])
-	filePath := fileDir + "a.mp4"
+	filePath := fileDir + "server_h264.mp4"
+	clientDbg := fileDir + "client_h264.mp4"
 
 	os.Create(filePath)
+	os.Create(clientDbg)
 	f, err := os.OpenFile(filePath, os.O_WRONLY, os.ModePerm)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+	fClientDbg, err := os.OpenFile(clientDbg, os.O_WRONLY, os.ModePerm)
 	if err != nil {
 		logger.Error(err.Error())
 	}
@@ -74,12 +80,20 @@ func main() {
 			h := codecs.H264Packet{}
 			hRaw, err := h.Unmarshal(p.Payload)
 
-			_, err = f.Write(p.Payload)
+			_, err = f.Write(hRaw)
 			if err != nil {
 				logger.Error(err.Error())
 			}
 			client.Send(websocket.BinaryMessage, hRaw)
 		})
+	}
+
+	for {
+		for _, client := range wsServer.Clients {
+			buff := <-client.RecvBuff
+			fClientDbg.Write(buff)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки
