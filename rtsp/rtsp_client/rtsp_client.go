@@ -288,7 +288,7 @@ func (client *RtspClient) broadcastRTP() {
 			recvRtpBuff := <-client.RtpServer.RecvBuff
 
 			for _, subscriber := range client.RtpSubscribers {
-				subscriber(recvRtpBuff)
+				go subscriber(recvRtpBuff)
 			}
 
 			recvRtpBuff = recvRtpBuff[:0]

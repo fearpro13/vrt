@@ -271,7 +271,7 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 						}
 					}
 				default:
-					logger.Error(fmt.Sprintf("Unsupported NAL Type %d", naluType))
+					logger.Warning(fmt.Sprintf("Unsupported NAL Type %d", naluType))
 				}
 			}
 		}

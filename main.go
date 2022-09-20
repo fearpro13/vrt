@@ -46,11 +46,7 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	broadcast := rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxy.RtspClient, wsServer)
-
-	time.Sleep(40 * time.Second)
-
-	broadcast.Stop()
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxy.RtspClient, wsServer)
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки
 	select {}
