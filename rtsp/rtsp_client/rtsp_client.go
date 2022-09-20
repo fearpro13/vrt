@@ -23,6 +23,7 @@ type RtspClient struct {
 	RtpServer                     *udp_server.UdpServer
 	RtpClient                     *udp_client.UdpClient
 	SessionId                     int64
+	CSeq                          int
 	RemoteAddress                 string
 	RemoteStreamAddress           string
 	IsConnected                   bool
@@ -46,6 +47,7 @@ func Create() RtspClient {
 
 	return RtspClient{
 		SessionId:      sessionId,
+		CSeq:           1,
 		TcpClient:      &tcpClient,
 		RtpServer:      &udpServer,
 		RtpClient:      &udpClient,
@@ -134,10 +136,11 @@ func (client *RtspClient) ReadMessage() (message string, err error) {
 func (client *RtspClient) Describe() error {
 	message := ""
 	message += fmt.Sprintf("DESCRIBE %s RTSP/1.0\r\n", client.RemoteAddress)
-	message += "CSeq: 1\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
 
+	client.CSeq++
 	_, err := client.TcpClient.Send(message)
 
 	return err
@@ -146,10 +149,13 @@ func (client *RtspClient) Describe() error {
 func (client *RtspClient) Options() error {
 	message := ""
 	message += fmt.Sprintf("OPTIONS %s RTSP/1.0\r\n", client.RemoteAddress)
-	message += "CSeq: 1\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
+
+	client.CSeq++
 	_, err := client.TcpClient.Send(message)
+
 	return err
 }
 
@@ -166,10 +172,11 @@ func (client *RtspClient) Setup() error {
 
 	message := ""
 	message += fmt.Sprintf("SETUP %s RTSP/1.0\r\n", client.RemoteStreamAddress)
-	message += "CSeq: 2\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d\r\n", portMin, portMax)
 	message += "\r\n"
 
+	client.CSeq++
 	_, err = client.TcpClient.Send(message)
 
 	return err
@@ -182,11 +189,14 @@ func (client *RtspClient) Play() error {
 
 	message := ""
 	message += fmt.Sprintf("PLAY %s RTSP/1.0\r\n", client.RemoteAddress)
-	message += "CSeq: 1\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += fmt.Sprintf("Session:%d\r\n", client.SessionId)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
+
+	client.CSeq++
 	_, err := client.TcpClient.Send(message)
+
 	return err
 }
 
@@ -197,11 +207,14 @@ func (client *RtspClient) Pause() error {
 
 	message := ""
 	message += fmt.Sprintf("PAUSE %s RTSP/1.0\r\n", client.RemoteAddress)
-	message += "CSeq: 1\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += fmt.Sprintf("Session:%d", client.SessionId)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
+
+	client.CSeq++
 	_, err := client.TcpClient.Send(message)
+
 	return err
 }
 
@@ -212,11 +225,12 @@ func (client *RtspClient) TearDown() error {
 
 	message := ""
 	message += fmt.Sprintf("TEARDOWN %s RTSP/1.0\r\n", client.RemoteAddress)
-	message += "CSeq: 1\r\n"
+	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += fmt.Sprintf("Session:%d", client.SessionId)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
 
+	client.CSeq++
 	_, err := client.TcpClient.Send(message)
 
 	return err

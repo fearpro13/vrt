@@ -165,7 +165,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 	if method == "describe" {
 		response = ""
 		response += "RTSP/1.0 200 OK\r\n" +
-			"CSeq: 1\r\n" +
+			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			"Content-Type: application/sdp\r\n" +
 			fmt.Sprintf("Content-Base: %s/\r\n", server.RtspAddress)
 
@@ -194,7 +194,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 
 	if method == "options" {
 		response = "RTSP/1.0 200 OK\r\n" +
-			"CSeq: 1\r\n" +
+			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			"Public: OPTIONS, DESCRIBE, PLAY, PAUSE, SETUP, TEARDOWN, SET_PARAMETER, GET_PARAMETER\r\n" +
 			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
 			"Content-Length: 0\r\n\r\n"
@@ -218,7 +218,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 		serverRtpPort := client.RtpClient.LocalPort
 
 		response = "RTSP/1.0 200 OK\r\n" +
-			"CSeq: 1\r\n" +
+			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			fmt.Sprintf("Session: %d;timeout=60\r\n", session) +
 			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1) +
 			"Content-Length: 0\r\n\r\n"
@@ -226,7 +226,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 
 	if method == "play" {
 		response = "RTSP/1.0 200 OK\r\n" +
-			"CSeq: 1\r\n" +
+			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			fmt.Sprintf("Session:%d\r\n", client.SessionId) +
 			fmt.Sprintf("RTP-Info: url=%s;seq=4563;rtptime=1435052840\r\n", server.StreamAddress) +
 			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
@@ -235,10 +235,12 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 
 	if method == "teardown" {
 		response = "RTSP/1.0 200 OK\r\n" +
-			"CSeq: 1\r\n" +
+			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			fmt.Sprintf("Session:%d\r\n", client.SessionId) +
 			fmt.Sprintf("%s\r\n", nowFormatted)
 	}
+
+	client.CSeq++
 
 	return response, err
 }
