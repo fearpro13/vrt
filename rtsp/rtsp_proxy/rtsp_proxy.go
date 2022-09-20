@@ -53,12 +53,15 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error
 		return err
 	}
 
-	//TODO Использование задержки недопустимо. Необходимо сделать так, чтобы после выполнение options запускался setup метод
 	time.Sleep(1 * time.Second)
+
+	//TODO Использование задержки недопустимо. Необходимо сделать так, чтобы после выполнение options запускался setup метод
 	err = client.Setup()
 	if err != nil {
 		return err
 	}
+
+	time.Sleep(1 * time.Second)
 
 	err = client.Play()
 	if err != nil {

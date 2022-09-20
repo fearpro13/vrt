@@ -1,55 +1,12 @@
-window.addEventListener('load',()=>{
-    var video = document.getElementById('sample')
+window.addEventListener('load', () => {
+    var video = document.getElementById('video_ws')
 
     var mediaSource = new MediaSource()
-    var mimeType = 'video/mp4; codecs="mp4a.40.2,avc1.64001f'
     var sourceBuffer = null
-
-    var mp4 = new muxjs.mp4.Transmuxer()
+    var streamingStarted = false;
+    var queue = [];
 
     video.src = URL.createObjectURL(mediaSource)
-
-    let appendNextSegment = () => {
-        mp4.off('data')
-        mp4.on('data', segment => {
-            let data = new Uint8Array(segment.initSegment.byteLength + segment.data.byteLength);
-
-            // Add the segment.initSegment (ftyp/moov) starting at position 0
-            data.set(segment.initSegment, 0);
-
-            // Add the segment.data (moof/mdat) starting after the initSegment
-            data.set(segment.data, segment.initSegment.byteLength);
-
-            console.log(muxjs.mp4.tools.inspect(data));
-
-            // Add your brand new fMP4 segment to your MSE Source Buffer
-            sourceBuffer.appendBuffer(data);
-        })
-    }
-
-    let appendFirstFrame = () => {
-        URL.revokeObjectURL(video.src)
-        sourceBuffer = mediaSource.addSourceBuffer(mimeType)
-        sourceBuffer.addEventListener('updateend',appendNextSegment)
-
-        mp4.on('data', segment => {
-            let data = new Uint8Array(segment.initSegment.byteLength + segment.data.byteLength);
-
-            // Add the segment.initSegment (ftyp/moov) starting at position 0
-            data.set(segment.initSegment, 0);
-
-            // Add the segment.data (moof/mdat) starting after the initSegment
-            data.set(segment.data, segment.initSegment.byteLength);
-
-            console.log(muxjs.mp4.tools.inspect(data));
-
-            // Add your brand new fMP4 segment to your MSE Source Buffer
-            sourceBuffer.appendBuffer(data);
-            ws.send(segment.data)
-        })
-    }
-
-    mediaSource.addEventListener('sourceopen',appendFirstFrame)
 
     let log = (message) => {
         let now = new Date()
@@ -69,32 +26,55 @@ window.addEventListener('load',()=>{
 
     let ws = new WebSocket(wsUrl)
     ws.binaryType = 'arraybuffer';
-    //ws.binaryType = 'blob'
-
     ws.onopen = () => {
         log("Connected")
     }
-
-    let packagesCollected = 0
-
-    ws.onmessage = (event) => {
-        let data = new Uint8Array(event.data)
-        mp4.push(data)
-
-        if (packagesCollected++ > 15){
-            mp4.flush()
-            packagesCollected=0
-        }
-
-    }
-
     ws.onclose = () => {
         log("Closed")
     }
-
     ws.onerror = (error) => {
         log("Error")
     }
 
+    ws.onmessage = function (event) {
+        var data = new Uint8Array(event.data);
+        if (data[0] === 9) {
+            decoded_arr = data.slice(1);
+            if (window.TextDecoder) {
+                mimeCodec = new TextDecoder("utf-8").decode(decoded_arr);
+            }
+
+            log('Initialized codec: ' + mimeCodec);
+
+            sourceBuffer = mediaSource.addSourceBuffer('video/mp4; codecs="' + mimeCodec + '"');
+            sourceBuffer.mode = "segments"
+            sourceBuffer.addEventListener("updateend", loadPacket);
+        } else {
+            pushPacket(event.data);
+        }
+    };
+
+    function pushPacket(packet) {
+        if (!streamingStarted) {
+            sourceBuffer.appendBuffer(packet);
+            streamingStarted = true;
+            return;
+        }
+        queue.push(packet);
+        if (!sourceBuffer.updating) {
+            loadPacket();
+        }
+    }
+
+    function loadPacket() {
+        if (!sourceBuffer.updating) {
+            if (queue.length > 0) {
+                let latestPacket = queue.shift();
+                sourceBuffer.appendBuffer(latestPacket);
+            } else {
+                streamingStarted = false;
+            }
+        }
+    }
 })
 

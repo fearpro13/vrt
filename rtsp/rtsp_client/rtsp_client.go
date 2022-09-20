@@ -1,8 +1,12 @@
 package rtsp_client
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"github.com/deepch/vdk/av"
+	"github.com/deepch/vdk/codec/h264parser"
+	"github.com/deepch/vdk/format/rtsp/sdp"
 	"math/rand"
 	"regexp"
 	"strconv"
@@ -14,13 +18,20 @@ import (
 )
 
 type RtspClient struct {
-	TcpClient           *tcp_client.TcpClient
-	RtpServer           *udp_server.UdpServer
-	RtpClient           *udp_client.UdpClient
-	SessionId           int64
-	RemoteAddress       string
-	RemoteStreamAddress string
-	IsConnected         bool
+	TcpClient                     *tcp_client.TcpClient
+	RtpServer                     *udp_server.UdpServer
+	RtpClient                     *udp_client.UdpClient
+	SessionId                     int64
+	RemoteAddress                 string
+	RemoteStreamAddress           string
+	IsConnected                   bool
+	PreVideoTimestamp             int64
+	RTPPacketFragmentationStarted bool
+	RTPBuffer                     bytes.Buffer
+	Sdp                           []sdp.Media
+	Codecs                        []av.CodecData
+	VideoCodec                    av.CodecType
+	VideoIDX                      int8
 }
 
 func Create() RtspClient {
@@ -120,6 +131,7 @@ func (client *RtspClient) Describe() error {
 	message += "\r\n"
 
 	_, err := client.TcpClient.Send(message)
+
 	return err
 }
 
@@ -163,7 +175,7 @@ func (client *RtspClient) Play() error {
 	message := ""
 	message += fmt.Sprintf("PLAY %s RTSP/1.0\r\n", client.RemoteAddress)
 	message += "CSeq: 1\r\n"
-	message += fmt.Sprintf("Session:%d", client.SessionId)
+	message += fmt.Sprintf("Session:%d\r\n", client.SessionId)
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
 	_, err := client.TcpClient.Send(message)
@@ -202,7 +214,38 @@ func (client *RtspClient) TearDown() error {
 	return err
 }
 
+const VIDEO = "video"
+const AUDIO = "audio"
+
 func parseMessage(client *RtspClient, message *string) {
+	_, client.Sdp = sdp.Parse(*message)
+
+	for _, i2 := range client.Sdp {
+		if i2.AVType != VIDEO && i2.AVType != AUDIO {
+			continue
+		}
+		if i2.AVType == VIDEO {
+			if i2.Type == av.H264 {
+				if len(i2.SpropParameterSets) > 1 {
+					if codecData, err := h264parser.NewCodecDataFromSPSAndPPS(i2.SpropParameterSets[0], i2.SpropParameterSets[1]); err == nil {
+						//client.sps = i2.SpropParameterSets[0]
+						//client.pps = i2.SpropParameterSets[1]
+						client.Codecs = append(client.Codecs, codecData)
+					}
+				} else {
+					client.Codecs = append(client.Codecs, h264parser.CodecData{})
+					//client.WaitCodec = true
+				}
+				//client.FPS = i2.FPS
+				client.VideoCodec = av.H264
+			} else {
+				logger.Error(fmt.Sprintf("SDP Video Codec Type Not Supported %s", i2.Type))
+			}
+		}
+		client.VideoIDX = int8(len(client.Codecs) - 1)
+		//client.videoID = client.chTMP
+	}
+
 	lines := strings.Split(*message, "\r\n")
 	for _, line := range lines {
 		matches, _ := regexp.MatchString("a=control", line)
