@@ -176,10 +176,10 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 		//	client.Println("drop packet", SequenceNumber-1)
 		//}
 		//client.PreSequenceNumber = SequenceNumber
-		if rtspClient.RTPBuffer.Len() > 4048576 {
+		if rtspClient.RTPFragmentationBuffer.Len() > 4048576 {
 			logger.Notice("Big Buffer Flush")
-			rtspClient.RTPBuffer.Truncate(0)
-			rtspClient.RTPBuffer.Reset()
+			rtspClient.RTPFragmentationBuffer.Truncate(0)
+			rtspClient.RTPFragmentationBuffer.Reset()
 		}
 		nalRaw, _ := h264parser.SplitNALUs(content[offset:end])
 		if len(nalRaw) == 0 || len(nalRaw[0]) == 0 {
@@ -235,23 +235,23 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 					isEnd := fuHeader&0x40 != 0
 					if isStart {
 						rtspClient.RTPPacketFragmentationStarted = true
-						rtspClient.RTPBuffer.Truncate(0)
-						rtspClient.RTPBuffer.Reset()
-						rtspClient.RTPBuffer.Write([]byte{fuIndicator&0xe0 | fuHeader&0x1f})
+						rtspClient.RTPFragmentationBuffer.Truncate(0)
+						rtspClient.RTPFragmentationBuffer.Reset()
+						rtspClient.RTPFragmentationBuffer.Write([]byte{fuIndicator&0xe0 | fuHeader&0x1f})
 					}
 					if rtspClient.RTPPacketFragmentationStarted {
-						rtspClient.RTPBuffer.Write(content[offset+2 : end])
+						rtspClient.RTPFragmentationBuffer.Write(content[offset+2 : end])
 						if isEnd {
 							rtspClient.RTPPacketFragmentationStarted = false
-							naluTypef := rtspClient.RTPBuffer.Bytes()[0] & 0x1f
+							naluTypef := rtspClient.RTPFragmentationBuffer.Bytes()[0] & 0x1f
 							if naluTypef == 7 || naluTypef == 9 {
-								bufered, _ := h264parser.SplitNALUs(append([]byte{0, 0, 0, 1}, rtspClient.RTPBuffer.Bytes()...))
+								bufered, _ := h264parser.SplitNALUs(append([]byte{0, 0, 0, 1}, rtspClient.RTPFragmentationBuffer.Bytes()...))
 								for _, v := range bufered {
 									naluTypefs := v[0] & 0x1f
 									switch {
 									case naluTypefs == 5:
-										rtspClient.RTPBuffer.Reset()
-										rtspClient.RTPBuffer.Write(v)
+										rtspClient.RTPFragmentationBuffer.Reset()
+										rtspClient.RTPFragmentationBuffer.Write(v)
 										naluTypef = 5
 									case naluTypefs == 7:
 										//client.CodecUpdateSPS(v)
@@ -261,7 +261,7 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 								}
 							}
 							retmap = append(retmap, &av.Packet{
-								Data:            append(int32ToBytes(rtspClient.RTPBuffer.Len()), rtspClient.RTPBuffer.Bytes()...),
+								Data:            append(int32ToBytes(rtspClient.RTPFragmentationBuffer.Len()), rtspClient.RTPFragmentationBuffer.Bytes()...),
 								CompositionTime: time.Duration(1) * time.Millisecond,
 								Duration:        time.Duration(float32(timestamp-rtspClient.PreVideoTimestamp)/90) * time.Millisecond,
 								Idx:             rtspClient.VideoIDX,

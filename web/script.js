@@ -21,8 +21,8 @@ window.addEventListener('load', () => {
     }
 
     let port = 6060
-    //let ip = "0.0.0.0"
-    let ip = "10.0.43.19"
+    let ip = "0.0.0.0"
+    //let ip = "10.0.43.19"
     let wsUrl = `ws://${ip}:${port}`
 
     let ws = new WebSocket(wsUrl)

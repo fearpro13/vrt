@@ -37,7 +37,7 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error
 
 	go proxy.run()
 
-	err = client.Connect(remoteRtspAddress)
+	err = client.Connect(remoteRtspAddress, rtsp_client.RtspTransportTcp)
 	if err != nil {
 		return err
 	}

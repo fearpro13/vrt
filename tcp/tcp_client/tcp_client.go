@@ -21,7 +21,7 @@ type TcpClient struct {
 func Create() TcpClient {
 	id := rand.Int63()
 	logger.Junk(fmt.Sprintf("TCP client #%d Created", id))
-	return TcpClient{Id: id, RecvBuff: make(chan []byte, 1024)}
+	return TcpClient{Id: id, RecvBuff: make(chan []byte, 65535)}
 }
 
 func CreateFromConnection(connection *net.TCPConn) (client TcpClient, err error) {
@@ -41,7 +41,6 @@ func CreateFromConnection(connection *net.TCPConn) (client TcpClient, err error)
 	client.Port = assignedPortInt
 	client.Socket = connection
 	client.IsConnected = true
-	client.RecvBuff = make(chan []byte, 1024)
 
 	go client.run()
 
@@ -75,8 +74,8 @@ func (client *TcpClient) Send(message string) (bytesWritten int, err error) {
 	return bytesWritten, err
 }
 
-func (client *TcpClient) ReadBytes() (bytes []byte, bytesRead int, err error) {
-	bytes = make([]byte, 2048)
+func (client *TcpClient) ReadBytes(bytesToRead int) (bytes []byte, bytesRead int, err error) {
+	bytes = make([]byte, bytesRead)
 	bytesRead, err = client.Socket.Read(bytes)
 
 	if bytesRead == 0 {
@@ -91,7 +90,7 @@ func (client *TcpClient) ReadBytes() (bytes []byte, bytesRead int, err error) {
 }
 
 func (client *TcpClient) ReadMessage() (message string, err error) {
-	bytes := make([]byte, 2048)
+	bytes := make([]byte, 65535)
 
 	var bytesReadTotal, bytesReadCurrent int
 	var bytesTotal []byte
@@ -124,11 +123,11 @@ func (client *TcpClient) Disconnect() error {
 }
 
 func (client *TcpClient) run() {
-	for client.IsConnected {
-		bytes, _, err := client.ReadBytes()
-		if err != nil {
-			logger.Error(err.Error())
-		}
-		client.RecvBuff <- bytes
-	}
+	//for client.IsConnected {
+	//	bytes, _, err := client.ReadBytes()
+	//	if err != nil {
+	//		logger.Error(err.Error())
+	//	}
+	//	client.RecvBuff <- bytes
+	//}
 }
