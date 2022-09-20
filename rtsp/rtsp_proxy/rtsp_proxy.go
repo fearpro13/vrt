@@ -1,26 +1,25 @@
 package rtsp_proxy
 
 import (
+	"math/rand"
 	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_server"
 )
 
-type RtpSubscriber func([]byte)
-
 type RtspProxy struct {
-	RtspClient     *rtsp_client.RtspClient
-	RtspServer     *rtsp_server.RtspServer
-	IsRunning      bool
-	RtpSubscribers map[int64]RtpSubscriber
+	SessionId  int64
+	RtspClient *rtsp_client.RtspClient
+	RtspServer *rtsp_server.RtspServer
+	IsRunning  bool
 }
 
 func Create() RtspProxy {
 	client := rtsp_client.Create()
 	server := rtsp_server.Create()
 
-	proxy := RtspProxy{RtspClient: &client, RtspServer: &server, RtpSubscribers: map[int64]RtpSubscriber{}}
+	proxy := RtspProxy{SessionId: rand.Int63(), RtspClient: &client, RtspServer: &server}
 
 	return proxy
 }
@@ -74,6 +73,8 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error
 func (proxy *RtspProxy) Stop() error {
 	client := proxy.RtspClient
 
+	client.UnsubscribeFromRtpBuff(proxy.SessionId)
+
 	proxy.IsRunning = false
 
 	err := client.TearDown()
@@ -89,53 +90,62 @@ func (proxy *RtspProxy) Stop() error {
 	return err
 }
 
-func (proxy *RtspProxy) SubscribeToRtpBuff(uid int64, subscriber RtpSubscriber) {
-	proxy.RtpSubscribers[uid] = subscriber
-}
-
-func (proxy *RtspProxy) UnsubscribeFromRtpBuff(uid int64) {
-	delete(proxy.RtpSubscribers, uid)
-}
-
 func (proxy *RtspProxy) run() {
 	rtspServer := proxy.RtspServer
 	rtspClient := proxy.RtspClient
 
-	var recvRtpBuff []byte
+	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytes []byte) {
+		if len(bytes) == 0 {
+			return
+		}
 
-	for proxy.IsRunning {
-		if rtspClient.RtpServer.IsRunning {
-			recvRtpBuff = <-rtspClient.RtpServer.RecvBuff
+		for _, client := range rtspServer.Clients {
+			if client.RtpClient.IsConnected {
+				cpyBuff := make([]byte, 2048)
+				bytesCopied := copy(cpyBuff, bytes)
+				cpyBuff = cpyBuff[:bytesCopied]
 
-			lockedBuff := make([]byte, 2048)
-			lockedBytes := copy(lockedBuff, recvRtpBuff)
-			lockedBuff = lockedBuff[:lockedBytes]
-
-			for _, client := range rtspServer.Clients {
-				if len(lockedBuff) > 0 && client.RtpClient.IsConnected {
-					cpyBuff := make([]byte, 2048)
-					bytesCopied := copy(cpyBuff, lockedBuff)
-					cpyBuff = cpyBuff[:bytesCopied]
-
-					err := client.RtpClient.Send(cpyBuff)
+				err := client.RtpClient.Send(cpyBuff)
+				if err != nil {
+					logger.Error(err.Error())
+					err = client.Disconnect()
 					if err != nil {
 						logger.Error(err.Error())
-						err = client.Disconnect()
-						if err != nil {
-							logger.Error(err.Error())
-						}
 					}
-
-					recvRtpBuff = recvRtpBuff[:0]
 				}
 			}
-
-			for _, subscriber := range proxy.RtpSubscribers {
-				subscriber(lockedBuff)
-			}
-
-			lockedBuff = lockedBuff[:0]
 		}
-		time.Sleep(time.Millisecond * 1)
-	}
+	})
+
+	//for proxy.IsRunning {
+	//	if rtspClient.RtpServer.IsRunning {
+	//		recvRtpBuff = <-rtspClient.RtpServer.RecvBuff
+	//
+	//		lockedBuff := make([]byte, 2048)
+	//		lockedBytes := copy(lockedBuff, recvRtpBuff)
+	//		lockedBuff = lockedBuff[:lockedBytes]
+	//
+	//		for _, client := range rtspServer.Clients {
+	//			if len(lockedBuff) > 0 && client.RtpClient.IsConnected {
+	//				cpyBuff := make([]byte, 2048)
+	//				bytesCopied := copy(cpyBuff, lockedBuff)
+	//				cpyBuff = cpyBuff[:bytesCopied]
+	//
+	//				err := client.RtpClient.Send(cpyBuff)
+	//				if err != nil {
+	//					logger.Error(err.Error())
+	//					err = client.Disconnect()
+	//					if err != nil {
+	//						logger.Error(err.Error())
+	//					}
+	//				}
+	//
+	//				recvRtpBuff = recvRtpBuff[:0]
+	//			}
+	//		}
+	//
+	//		lockedBuff = lockedBuff[:0]
+	//	}
+	//	time.Sleep(time.Millisecond * 1)
+	//}
 }

@@ -64,7 +64,10 @@ func (client *WSClient) SetCallback(callback WSClientCallback) {
 func (client *WSClient) Disconnect() error {
 	client.IsConnected = false
 	err := client.Socket.Close()
-	client.onDisconnect(client)
+
+	if client.onDisconnect != nil {
+		client.onDisconnect(client)
+	}
 
 	logger.Debug(fmt.Sprintf("WS client #%d: Disconnected ", client.SessionId))
 

@@ -3,6 +3,7 @@ package ws_server
 import (
 	"fmt"
 	"github.com/gorilla/websocket"
+	"math/rand"
 	"net/http"
 	"sync"
 	"time"
@@ -22,7 +23,7 @@ type WSServer struct {
 }
 
 func Create() *WSServer {
-	server := &WSServer{Clients: map[int64]*ws_client.WSClient{}}
+	server := &WSServer{SessionId: rand.Int63(), Clients: map[int64]*ws_client.WSClient{}}
 
 	return server
 }
@@ -78,7 +79,9 @@ func (server *WSServer) entryPointHandler(w http.ResponseWriter, r *http.Request
 	server.Clients[wsClient.SessionId] = wsClient
 	server.Unlock()
 
-	server.Callback(wsClient)
+	if server.Callback != nil {
+		server.Callback(wsClient)
+	}
 }
 
 func (server *WSServer) sync() {

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"vrt/logger"
 	"vrt/tcp/tcp_client"
 	"vrt/udp/udp_client"
@@ -27,12 +28,15 @@ type RtspClient struct {
 	IsConnected                   bool
 	PreVideoTimestamp             int64
 	RTPPacketFragmentationStarted bool
-	RTPBuffer                     bytes.Buffer
+	RTPBuffer                     bytes.Buffer //used for NALU FU buffer
 	Sdp                           []sdp.Media
 	Codecs                        []av.CodecData
 	VideoCodec                    av.CodecType
 	VideoIDX                      int8
+	RtpSubscribers                map[int64]RtpSubscriber
 }
+
+type RtpSubscriber func([]byte)
 
 func Create() RtspClient {
 	sessionId := rand.Int63()
@@ -40,13 +44,16 @@ func Create() RtspClient {
 	udpServer := udp_server.Create()
 	udpClient := udp_client.Create()
 
-	//logger.Info(fmt.Sprintf("RTSP client #%d created", sessionId))
-
-	return RtspClient{SessionId: sessionId, TcpClient: &tcpClient, RtpServer: &udpServer, RtpClient: &udpClient}
+	return RtspClient{
+		SessionId:      sessionId,
+		TcpClient:      &tcpClient,
+		RtpServer:      &udpServer,
+		RtpClient:      &udpClient,
+		RtpSubscribers: map[int64]RtpSubscriber{},
+	}
 }
 
 func (client *RtspClient) Connect(address string) error {
-	//rtsp://login:pass@10.0.43.19
 	hasRtsp, _ := regexp.MatchString("^rtsp:/{2}", address)
 	hasCreds, _ := regexp.MatchString("\\w+:\\w+", address)
 
@@ -85,6 +92,7 @@ func (client *RtspClient) Connect(address string) error {
 	logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
 
 	go client.run()
+	go client.broadcastRTP()
 
 	return err
 }
@@ -262,6 +270,30 @@ func parseMessage(client *RtspClient, message *string) {
 			sessionIdString := sessionIdExp.FindString(line)
 			sessionIdInt64, _ := strconv.ParseInt(sessionIdString, 10, 64)
 			client.SessionId = sessionIdInt64
+		}
+	}
+}
+
+func (client *RtspClient) SubscribeToRtpBuff(uid int64, subscriber RtpSubscriber) {
+	client.RtpSubscribers[uid] = subscriber
+}
+
+func (client *RtspClient) UnsubscribeFromRtpBuff(uid int64) {
+	delete(client.RtpSubscribers, uid)
+}
+
+func (client *RtspClient) broadcastRTP() {
+	for client.IsConnected {
+		if client.RtpServer.IsRunning {
+			recvRtpBuff := <-client.RtpServer.RecvBuff
+
+			for _, subscriber := range client.RtpSubscribers {
+				subscriber(recvRtpBuff)
+			}
+
+			recvRtpBuff = recvRtpBuff[:0]
+		} else {
+			time.Sleep(20 * time.Millisecond)
 		}
 	}
 }
