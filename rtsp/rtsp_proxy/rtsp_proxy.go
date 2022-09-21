@@ -2,7 +2,6 @@ package rtsp_proxy
 
 import (
 	"math/rand"
-	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_server"
@@ -19,7 +18,7 @@ func Create() RtspProxy {
 	client := rtsp_client.Create()
 	server := rtsp_server.Create()
 
-	proxy := RtspProxy{SessionId: rand.Int63(), RtspClient: &client, RtspServer: &server}
+	proxy := RtspProxy{SessionId: rand.Int63(), RtspClient: client, RtspServer: server}
 
 	return proxy
 }
@@ -42,27 +41,27 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error
 		return err
 	}
 
-	err = client.Describe()
+	_, err = client.Describe()
 	if err != nil {
 		return err
 	}
 
-	err = client.Options()
+	_, err = client.Options()
 	if err != nil {
 		return err
 	}
 
-	time.Sleep(1 * time.Second)
+	//time.Sleep(1 * time.Second)
 
 	//TODO Использование задержки недопустимо. Необходимо сделать так, чтобы после выполнение options запускался setup метод
-	err = client.Setup()
+	_, err = client.Setup()
 	if err != nil {
 		return err
 	}
 
-	time.Sleep(1 * time.Second)
+	//time.Sleep(1 * time.Second)
 
-	err = client.Play()
+	_, err = client.Play()
 	if err != nil {
 		return err
 	}
@@ -77,7 +76,7 @@ func (proxy *RtspProxy) Stop() error {
 
 	proxy.IsRunning = false
 
-	err := client.TearDown()
+	_, err := client.TearDown()
 	if err != nil {
 		return err
 	}

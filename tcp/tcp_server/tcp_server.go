@@ -11,12 +11,15 @@ import (
 	"vrt/tcp/tcp_client"
 )
 
+type onConnectCallback func(client *tcp_client.TcpClient)
+
 type TcpServer struct {
 	Id        int64
 	Ip        string
 	Port      int
 	Socket    *net.TCPListener
 	Clients   []*tcp_client.TcpClient
+	OnConnect onConnectCallback
 	IsRunning bool
 }
 
@@ -85,7 +88,11 @@ func (server *TcpServer) run() {
 
 		client, err := tcp_client.CreateFromConnection(connection)
 		block.Lock()
-		server.Clients = append(server.Clients, &client)
+		server.Clients = append(server.Clients, client)
 		block.Unlock()
+
+		if server.OnConnect != nil {
+			server.OnConnect(client)
+		}
 	}
 }

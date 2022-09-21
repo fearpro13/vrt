@@ -11,6 +11,7 @@ import (
 	"time"
 	"vrt/logger"
 	rtspClient "vrt/rtsp/rtsp_client"
+	"vrt/tcp/tcp_client"
 	"vrt/tcp/tcp_server"
 	"vrt/udp/udp_client"
 )
@@ -29,22 +30,23 @@ type RtspServer struct {
 	RtpLocalPort  int
 	RtcpServer    *tcp_server.TcpServer
 	RtcpLocalPort int
-	Clients       map[int64]*rtspClient.RtspClient
-	IsRunning     bool
+	sync.Mutex
+	Clients   map[int64]*rtspClient.RtspClient
+	IsRunning bool
 }
 
-func Create() RtspServer {
+func Create() *RtspServer {
 	id := rand.Int63()
-	server := RtspServer{Id: id, Login: "user", Password: "qwerty"}
+	server := &RtspServer{Id: id, Login: "user", Password: "qwerty"}
 	server.Clients = map[int64]*rtspClient.RtspClient{}
-
-	//logger.Debug(fmt.Sprintf("Created Rtsp server #%d", id))
 
 	return server
 }
 
 func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) error {
 	tcpServer := tcp_server.Create()
+	tcpServer.OnConnect = server.connectRtspClient
+
 	err := tcpServer.Start(ip, port)
 	if err != nil {
 		return err
@@ -73,7 +75,6 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 	server.IsRunning = true
 
 	go server.run()
-	go server.sync()
 
 	logger.Info(fmt.Sprintf("RTSP server started at %s", rtspAddress))
 
@@ -92,53 +93,90 @@ func (server *RtspServer) Stop() error {
 	return err
 }
 
-func (server *RtspServer) sync() {
-	var block sync.Mutex
+//func (server *RtspServer) sync() {
+//	var block sync.Mutex
+//
+//	for server.IsRunning {
+//		for _, tcpClient := range server.Server.Clients {
+//			block.Lock()
+//			currClient, alreadyMapped := server.Clients[tcpClient.SessionId]
+//			block.Unlock()
+//			if !alreadyMapped {
+//				client := rtspClient.Create()
+//				//TODO Добавить метод createFromTcpConnection для rtspClient
+//				client.TcpClient = tcpClient
+//				client.IsConnected = true
+//				server.Clients[tcpClient.SessionId] = &client
+//
+//				logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
+//			} else if !currClient.IsConnected {
+//				delete(server.Clients, tcpClient.SessionId)
+//				logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", currClient.SessionId))
+//				logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
+//			}
+//		}
+//		time.Sleep(time.Millisecond * 5)
+//	}
+//}
 
-	for server.IsRunning {
-		for _, tcpClient := range server.Server.Clients {
-			block.Lock()
-			currClient, alreadyMapped := server.Clients[tcpClient.Id]
-			block.Unlock()
-			if !alreadyMapped {
-				client := rtspClient.Create()
-				//TODO Добавить метод createFromTcpConnection для rtspClient
-				client.TcpClient = tcpClient
-				client.IsConnected = true
-				server.Clients[tcpClient.Id] = &client
+func (server *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.TcpClient) {
+	client := rtspClient.Create()
 
-				logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
-			} else if !currClient.IsConnected {
-				delete(server.Clients, tcpClient.Id)
-				logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", currClient.SessionId))
-				logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
-			}
+	//TODO Добавить метод createFromTcpConnection для rtspClient
+	client.TcpClient = connectedTcpClient
+	client.IsConnected = true
+	server.Lock()
+	server.Clients[connectedTcpClient.SessionId] = client
+	server.Unlock()
+	logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
+
+	connectedTcpClient.OnDisconnect = func(disconnectedClient *tcp_client.TcpClient) {
+		delete(server.Clients, connectedTcpClient.SessionId)
+		logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", disconnectedClient.SessionId))
+		logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
+	}
+
+	go server.handleRtspClient(client)
+}
+
+func (server *RtspServer) handleRtspClient(rtspClient *rtspClient.RtspClient) {
+	for !rtspClient.IsPlaying {
+		request, err := rtspClient.ReadMessage()
+		if err != nil {
+			logger.Error(err.Error())
 		}
-		time.Sleep(time.Millisecond * 5)
+		response, err := parseRequest(server, rtspClient, request)
+		if err != nil {
+			logger.Error(err.Error())
+		}
+		_, err = rtspClient.TcpClient.Send(response)
+		if err != nil {
+			logger.Error(err.Error())
+		}
 	}
 }
 
 func (server *RtspServer) run() {
 	for server.IsRunning {
 		for _, client := range server.Clients {
-			select {
-			case bytes := <-client.TcpClient.RecvBuff:
-				message := string(bytes)
-				if message != "" {
-					response, err := parseRequest(server, client, message)
+			bytes, err := client.TcpClient.IO.Read([]byte{0})
+			if err != nil {
+				logger.Error(err.Error())
+			}
+			message := string(bytes)
+			if message != "" {
+				response, err := parseRequest(server, client, message)
+				if err != nil {
+					logger.Error(err.Error())
+				}
+				if response != "" {
+					_, err = client.TcpClient.Send(response)
 					if err != nil {
 						logger.Error(err.Error())
 					}
-					if response != "" {
-						_, err = client.TcpClient.Send(response)
-						if err != nil {
-							logger.Error(err.Error())
-						}
-					}
 				}
-			default:
-				continue
 			}
+
 		}
 		time.Sleep(time.Millisecond * 5)
 	}
@@ -231,13 +269,18 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 			fmt.Sprintf("RTP-Info: url=%s;seq=4563;rtptime=1435052840\r\n", server.StreamAddress) +
 			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
 			"Content-Length: 0\r\n\r\n"
+
+		client.IsPlaying = true
 	}
 
 	if method == "teardown" {
 		response = "RTSP/1.0 200 OK\r\n" +
 			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			fmt.Sprintf("Session:%d\r\n", client.SessionId) +
-			fmt.Sprintf("%s\r\n", nowFormatted)
+			fmt.Sprintf("%s\r\n", nowFormatted) +
+			"Content-Length: 0\r\n\r\n"
+
+		client.IsPlaying = false
 	}
 
 	client.CSeq++
