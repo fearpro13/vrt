@@ -23,7 +23,7 @@ func Create() RtspProxy {
 	return proxy
 }
 
-func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error {
+func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int, transport string) error {
 	client := proxy.RtspClient
 	server := proxy.RtspServer
 
@@ -36,7 +36,8 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int) error
 
 	go proxy.run()
 
-	err = client.Connect(remoteRtspAddress, rtsp_client.RtspTransportTcp)
+	//err = client.Connect(remoteRtspAddress, rtsp_client.RtspTransportTcp)
+	err = client.Connect(remoteRtspAddress, transport)
 	if err != nil {
 		return err
 	}

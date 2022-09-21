@@ -7,7 +7,10 @@ import (
 	"strconv"
 	"time"
 	"vrt/logger"
+	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_proxy"
+	"vrt/rtsp_to_ws"
+	"vrt/ws/ws_server"
 )
 
 func main() {
@@ -32,19 +35,19 @@ func main() {
 	address := os.Args[1]
 
 	rtspProxy := rtsp_proxy.Create()
-	err := rtspProxy.Start(address, 0)
+	err := rtspProxy.Start(address, 0, rtsp_client.RtspTransportUdp)
 	if err != nil {
 		logger.Error(err.Error())
 		os.Exit(1)
 	}
-	//
-	//wsServer := ws_server.Create()
-	//err = wsServer.Start("", 6060)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxy.RtspClient, wsServer)
+
+	wsServer := ws_server.Create()
+	err = wsServer.Start("", 6060)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxy.RtspClient, wsServer)
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки
 	select {}

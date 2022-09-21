@@ -63,6 +63,8 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 
 		var start = false
 
+		var timeLine = make(map[int8]time.Duration)
+
 		rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytes []byte) {
 			interleavedFakeFrame := make([]byte, 4)
 			interleavedFakeFrame[0] = 36
@@ -83,7 +85,10 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 					continue
 				}
 
-				_, hRaw, _ := muxer.WritePacket(*packet, false)
+				timeLine[packet.Idx] += packet.Duration
+				packet.Time = timeLine[packet.Idx]
+
+				_, hRaw, _ := muxer.WritePacket(*packet, true)
 
 				if len(hRaw) > 0 {
 					client.Send(websocket.BinaryMessage, hRaw)
@@ -199,6 +204,8 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 						Duration:        time.Duration(float32(timestamp-rtspClient.PreVideoTimestamp)/90) * time.Millisecond,
 						Time:            time.Duration(timestamp/90) * time.Millisecond,
 					})
+				case naluType == 6:
+					//some crazy shit. it is present in standard but not used
 				case naluType == 7:
 					//client.CodecUpdateSPS(nal)
 				case naluType == 8:

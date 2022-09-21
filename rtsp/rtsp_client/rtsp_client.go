@@ -68,6 +68,16 @@ func Create() *RtspClient {
 	return rtspClient
 }
 
+func CreateFromConnection(tcpClient *tcp_client.TcpClient) *RtspClient {
+	client := Create()
+
+	client.TcpClient = tcpClient
+	client.IsConnected = true
+	logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
+
+	return client
+}
+
 func (client *RtspClient) Connect(address string, transport string) error {
 	if transport == "" {
 		transport = RtspTransportUdp
@@ -152,6 +162,10 @@ func (client *RtspClient) Disconnect() error {
 
 	client.IsConnected = false
 
+	if client.OnDisconnect != nil {
+		client.OnDisconnect(client)
+	}
+
 	logger.Info(fmt.Sprintf("RTSP client #%d disconnected", client.SessionId))
 
 	return nil
@@ -192,9 +206,9 @@ func (client *RtspClient) Options() (response string, err error) {
 	message += fmt.Sprintf("OPTIONS %s RTSP/1.0\r\n", client.RemoteAddress)
 	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 
-	if client.Transport == RtspTransportTcp {
-		message += "Require: implicit-play\r\n"
-	}
+	//if client.Transport == RtspTransportTcp {
+	//	message += "Require: implicit-play\r\n"
+	//}
 
 	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
 	message += "\r\n"
@@ -316,7 +330,7 @@ func (client *RtspClient) TearDown() (response string, err error) {
 	message += fmt.Sprintf("TEARDOWN %s RTSP/1.0\r\n", client.RemoteAddress)
 	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 	message += fmt.Sprintf("Session:%d", client.SessionId)
-	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
+	message += "Accept: application/sdp\r\n"
 	message += "\r\n"
 
 	client.CSeq++
@@ -349,6 +363,15 @@ func (client *RtspClient) ReadMessage() (message string, err error) {
 
 	//statusLineExp := regexp.MustCompile("^[rR][tT][sS][pP]/(\\d\\.\\d)\\s+(\\d+)\\s+(\\w+)$")
 	firstResponseLine, err := client.TcpClient.ReadLine()
+	if err != nil {
+		if err == io.EOF {
+			err = client.Disconnect()
+			if err != nil {
+				return "", err
+			}
+		}
+		return "", err
+	}
 	//
 	//parsedStatusLine := statusLineExp.FindStringSubmatch(firstResponseLine)
 	////rtspVersion := parsedFirstLine[1]
@@ -445,10 +468,9 @@ func (client *RtspClient) UnsubscribeFromRtpBuff(uid int64) {
 }
 
 func (client *RtspClient) broadcastRTP() {
-	recvRtpBuff := make([]byte, 2048)
 	for client.IsConnected {
 
-		recvRtpBuff = <-client.RTPChan
+		recvRtpBuff := <-client.RTPChan
 
 		for _, subscriber := range client.RtpSubscribers {
 			go subscriber(recvRtpBuff)
@@ -469,24 +491,24 @@ func (client *RtspClient) run() {
 			interleaved := header[0] == 0x24
 			if interleaved {
 				contentLen := int(binary.BigEndian.Uint16(header[2:]))
-				content := make([]byte, contentLen)
-				bytesRead, err := io.ReadFull(client.TcpClient.IO, content)
+				rtpPacket := make([]byte, contentLen)
+				bytesRead, err := io.ReadFull(client.TcpClient.IO, rtpPacket)
 				if err != nil {
 					logger.Error(err.Error())
 				}
-				content = content[:bytesRead]
+				rtpPacket = rtpPacket[:bytesRead]
 
-				rtpPacket := extractInterleavedFrame(content)
+				//rtpPacket := extractInterleavedFrame(content)
 				client.RTPChan <- rtpPacket
 			} else {
 				logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
 			}
 		}
 		if client.Transport == RtspTransportUdp {
-			content := <-client.RtpServer.RecvBuff
-			rtpPacket := extractInterleavedFrame(content)
+			//content := <-client.RtpServer.RecvBuff
+			//rtpPacket := extractInterleavedFrame(content)
 
-			client.RTPChan <- rtpPacket
+			client.RTPChan <- <-client.RtpServer.RecvBuff
 		}
 	}
 }

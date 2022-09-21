@@ -17,7 +17,7 @@ import (
 )
 
 type RtspServer struct {
-	Id            int64
+	SessionId     int64
 	Login         string
 	Password      string
 	Server        *tcp_server.TcpServer
@@ -37,7 +37,7 @@ type RtspServer struct {
 
 func Create() *RtspServer {
 	id := rand.Int63()
-	server := &RtspServer{Id: id, Login: "user", Password: "qwerty"}
+	server := &RtspServer{SessionId: id, Login: "user", Password: "qwerty"}
 	server.Clients = map[int64]*rtspClient.RtspClient{}
 
 	return server
@@ -74,7 +74,7 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 	server.StreamAddress = streamAddress
 	server.IsRunning = true
 
-	go server.run()
+	//go server.run()
 
 	logger.Info(fmt.Sprintf("RTSP server started at %s", rtspAddress))
 
@@ -120,19 +120,15 @@ func (server *RtspServer) Stop() error {
 //}
 
 func (server *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.TcpClient) {
-	client := rtspClient.Create()
+	client := rtspClient.CreateFromConnection(connectedTcpClient)
 
-	//TODO Добавить метод createFromTcpConnection для rtspClient
-	client.TcpClient = connectedTcpClient
-	client.IsConnected = true
 	server.Lock()
-	server.Clients[connectedTcpClient.SessionId] = client
+	server.Clients[client.SessionId] = client
 	server.Unlock()
-	logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
 
-	connectedTcpClient.OnDisconnect = func(disconnectedClient *tcp_client.TcpClient) {
-		delete(server.Clients, connectedTcpClient.SessionId)
-		logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", disconnectedClient.SessionId))
+	client.OnDisconnect = func(client *rtspClient.RtspClient) {
+		delete(server.Clients, client.SessionId)
+		logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", client.SessionId))
 		logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
 	}
 
@@ -156,34 +152,34 @@ func (server *RtspServer) handleRtspClient(rtspClient *rtspClient.RtspClient) {
 	}
 }
 
-func (server *RtspServer) run() {
-	for server.IsRunning {
-		for _, client := range server.Clients {
-			bytes, err := client.TcpClient.IO.Read([]byte{0})
-			if err != nil {
-				logger.Error(err.Error())
-			}
-			message := string(bytes)
-			if message != "" {
-				response, err := parseRequest(server, client, message)
-				if err != nil {
-					logger.Error(err.Error())
-				}
-				if response != "" {
-					_, err = client.TcpClient.Send(response)
-					if err != nil {
-						logger.Error(err.Error())
-					}
-				}
-			}
+//func (server *RtspServer) run() {
+//	for server.IsRunning {
+//		for _, client := range server.Clients {
+//			bytes, err := client.TcpClient.IO.Read([]byte{0})
+//			if err != nil {
+//				logger.Error(err.Error())
+//			}
+//			message := string(bytes)
+//			if message != "" {
+//				response, err := parseRequest(server, client, message)
+//				if err != nil {
+//					logger.Error(err.Error())
+//				}
+//				if response != "" {
+//					_, err = client.TcpClient.Send(response)
+//					if err != nil {
+//						logger.Error(err.Error())
+//					}
+//				}
+//			}
+//
+//		}
+//		time.Sleep(time.Millisecond * 5)
+//	}
+//}
 
-		}
-		time.Sleep(time.Millisecond * 5)
-	}
-}
-
-func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message string) (response string, err error) {
-	responseLines := strings.Split(message, "\r\n")
+func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request string) (response string, err error) {
+	requestLines := strings.Split(request, "\r\n")
 
 	methodExp, err := regexp.Compile("^\\w+")
 
@@ -191,10 +187,10 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 		return "", err
 	}
 
-	method := strings.ToLower(methodExp.FindString(responseLines[0]))
+	method := strings.ToLower(methodExp.FindString(requestLines[0]))
 
 	if method == "" {
-		return "", errors.New("некорректный метод запроса")
+		return "", errors.New(fmt.Sprintf("rtsp server #%d: Некорректный метод запроса %s", server.SessionId, method))
 	}
 
 	now := time.Now()
@@ -243,7 +239,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, message str
 		if err != nil {
 			return "", nil
 		}
-		portMatches := transportExp.FindStringSubmatch(message)
+		portMatches := transportExp.FindStringSubmatch(request)
 		clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
 		clientRtpPortRightInt64, err := strconv.ParseInt(portMatches[2], 10, 64)
 

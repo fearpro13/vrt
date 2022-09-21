@@ -135,7 +135,7 @@ func (client *TcpClient) ReadLine() (message string, err error) {
 		if err == io.EOF {
 			err = client.Disconnect()
 		}
-		return "", nil
+		return "", err
 	}
 
 	message = string(messageBytes)
