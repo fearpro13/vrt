@@ -35,6 +35,7 @@ type RtspClient struct {
 	RemoteStreamAddress           string
 	IsConnected                   bool
 	IsPlaying                     bool
+	StartVideoTimestamp           int64
 	PreVideoTimestamp             int64
 	RTPPacketFragmentationStarted bool
 	RTPFragmentationBuffer        bytes.Buffer //used for NALU FU buffer
@@ -62,7 +63,7 @@ func Create() *RtspClient {
 		RtpServer:      &udpServer,
 		RtpClient:      &udpClient,
 		RtpSubscribers: map[int64]RtpSubscriber{},
-		RTPChan:        make(chan []byte, 2048),
+		RTPChan:        make(chan []byte, 4096),
 	}
 
 	return rtspClient
@@ -183,7 +184,7 @@ func (client *RtspClient) Describe() (response string, err error) {
 	message := ""
 	message += fmt.Sprintf("DESCRIBE %s RTSP/1.0\r\n", client.RemoteAddress)
 	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
-	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
+	message += "Accept: application/sdp\r\n"
 	message += "\r\n"
 
 	client.CSeq++
@@ -210,7 +211,7 @@ func (client *RtspClient) Options() (response string, err error) {
 	//	message += "Require: implicit-play\r\n"
 	//}
 
-	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
+	message += "Accept: application/sdp\r\n"
 	message += "\r\n"
 
 	client.CSeq++
@@ -292,6 +293,20 @@ func (client *RtspClient) Play() (response string, err error) {
 	response, err = client.ReadMessage()
 	if err != nil {
 		return "", err
+	}
+
+	rtpTimeExp := regexp.MustCompile("rtptime=(\\d+)")
+	responseLines := strings.Split(response, "\r\n")
+	for _, responseLine := range responseLines {
+		if rtpTimeExp.MatchString(responseLine) {
+			rtpTimeString := rtpTimeExp.FindStringSubmatch(responseLine)[1]
+			rtpTimeInt, err := strconv.ParseInt(rtpTimeString, 10, 64)
+			if err != nil {
+				return "", nil
+			}
+			client.StartVideoTimestamp = rtpTimeInt
+			break
+		}
 	}
 
 	client.IsPlaying = true
@@ -473,7 +488,7 @@ func (client *RtspClient) broadcastRTP() {
 		recvRtpBuff := <-client.RTPChan
 
 		for _, subscriber := range client.RtpSubscribers {
-			go subscriber(recvRtpBuff)
+			subscriber(recvRtpBuff)
 		}
 
 		recvRtpBuff = recvRtpBuff[:0]
@@ -490,13 +505,16 @@ func (client *RtspClient) run() {
 			}
 			interleaved := header[0] == 0x24
 			if interleaved {
-				contentLen := int(binary.BigEndian.Uint16(header[2:]))
-				rtpPacket := make([]byte, contentLen)
-				bytesRead, err := io.ReadFull(client.TcpClient.IO, rtpPacket)
+				contentLen := int32(binary.BigEndian.Uint16(header[2:]))
+				rtpContent := make([]byte, contentLen)
+				_, err := io.ReadFull(client.TcpClient.IO, rtpContent)
 				if err != nil {
 					logger.Error(err.Error())
 				}
-				rtpPacket = rtpPacket[:bytesRead]
+
+				rtpPacket := make([]byte, contentLen+4)
+				copy(rtpPacket, header)
+				copy(rtpPacket, rtpContent)
 
 				//rtpPacket := extractInterleavedFrame(content)
 				client.RTPChan <- rtpPacket

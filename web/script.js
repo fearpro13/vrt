@@ -85,7 +85,7 @@ window.addEventListener('load', () => {
     }
 
     new websocketStream("ws://0.0.0.0:6061",'video_tcp',log)
-    new websocketStream("ws://0.0.0.0:6062",'video_udp',log)
+    //new websocketStream("ws://0.0.0.0:6062",'video_udp',log)
     // websocketStream("ws://0.0.0.0:6063",'video_proxy_tcp',log)
     // websocketStream("ws://0.0.0.0:6064",'video_proxy_udp',log)
 })

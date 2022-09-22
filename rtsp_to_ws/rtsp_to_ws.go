@@ -58,24 +58,43 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 		}
 		meta, init := muxer.GetInit(codecs)
 
-		client.Send(websocket.BinaryMessage, append([]byte{9}, meta...))
-		client.Send(websocket.BinaryMessage, init)
+		err = client.Send(websocket.BinaryMessage, append([]byte{9}, meta...))
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		err = client.Send(websocket.BinaryMessage, init)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
 
-		var start = false
+		start := false
 
 		//var timeLine = make(map[int8]time.Duration)
 
 		rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytes []byte) {
-			interleavedFakeFrame := make([]byte, 4)
-			interleavedFakeFrame[0] = 36
-			interleavedFakeFrame[1] = bytes[1] //96 = videoID RTP format from SDP
-			payloadSizeBytes := int16ToBytes(len(bytes))
-			interleavedFakeFrame[2] = payloadSizeBytes[0]
-			interleavedFakeFrame[3] = payloadSizeBytes[1]
+			if len(bytes) == 0 {
+				return
+			}
 
-			bytes = append(interleavedFakeFrame, bytes...)
+			var packets []*av.Packet
+			if bytes[0] != 0x24 {
+				interleavedFakeFrame := make([]byte, 4)
+				interleavedFakeFrame[0] = 36
+				interleavedFakeFrame[1] = bytes[1] //96 = videoID RTP format from SDP
+				payloadSizeBytes := int16ToBytes(len(bytes))
+				interleavedFakeFrame[2] = payloadSizeBytes[0]
+				interleavedFakeFrame[3] = payloadSizeBytes[1]
 
-			packets, _ := rtpDemux(rtspClient, &bytes)
+				rtpRaw := make([]byte, len(bytes)+4)
+				copy(rtpRaw, interleavedFakeFrame)
+				copy(rtpRaw[4:], bytes)
+
+				packets, _ = rtpDemux(rtspClient, &rtpRaw)
+			} else {
+				packets, _ = rtpDemux(rtspClient, &bytes)
+			}
 
 			for _, packet := range packets {
 				if packet.IsKeyFrame {
@@ -88,11 +107,11 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 				//timeLine[packet.Idx] += packet.Duration
 				//packet.Time = timeLine[packet.Idx]
 
-				_, hRaw, _ := muxer.WritePacket(*packet, true)
+				_, hRaw, _ := muxer.WritePacket(*packet, false)
 
-				if len(hRaw) > 0 {
-					client.Send(websocket.BinaryMessage, hRaw)
-				}
+				//if len(hRaw) > 0 {
+				client.Send(websocket.BinaryMessage, hRaw)
+				//}
 
 			}
 		})

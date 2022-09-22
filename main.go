@@ -36,7 +36,7 @@ func main() {
 
 	address := os.Args[1]
 
-	//////////////////////////////////////////////////////////
+	////////////////////////////////////////////////////////
 	rtspProxyTcp := rtsp_proxy.Create()
 	err := rtspProxyTcp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportTcp)
 	if err != nil {
@@ -52,21 +52,21 @@ func main() {
 
 	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
 
-	//////////////////////////////////////////////////////////
-	rtspProxyUdp := rtsp_proxy.Create()
-	err = rtspProxyUdp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportUdp)
-	if err != nil {
-		logger.Error(err.Error())
-		os.Exit(1)
-	}
-
-	wsServer2 := ws_server.Create()
-	err = wsServer2.Start("", 6062)
-	if err != nil {
-		logger.Error(err.Error())
-	}
-
-	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
+	////////////////////////////////////////////////////////////
+	//rtspProxyUdp := rtsp_proxy.Create()
+	//err := rtspProxyUdp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportUdp)
+	//if err != nil {
+	//	logger.Error(err.Error())
+	//	os.Exit(1)
+	//}
+	//
+	//wsServer2 := ws_server.Create()
+	//err = wsServer2.Start("", 6062)
+	//if err != nil {
+	//	logger.Error(err.Error())
+	//}
+	//
+	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
 
 	////////////////////////////////////////////////////////////
 	//rtspClientTcp := rtsp_client.Create()
