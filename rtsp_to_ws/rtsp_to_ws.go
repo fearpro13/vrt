@@ -63,7 +63,7 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 
 		var start = false
 
-		var timeLine = make(map[int8]time.Duration)
+		//var timeLine = make(map[int8]time.Duration)
 
 		rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytes []byte) {
 			interleavedFakeFrame := make([]byte, 4)
@@ -85,8 +85,8 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 					continue
 				}
 
-				timeLine[packet.Idx] += packet.Duration
-				packet.Time = timeLine[packet.Idx]
+				//timeLine[packet.Idx] += packet.Duration
+				//packet.Time = timeLine[packet.Idx]
 
 				_, hRaw, _ := muxer.WritePacket(*packet, true)
 

@@ -29,8 +29,9 @@ func Create() *WSServer {
 }
 
 func (server *WSServer) Start(ip string, port int) error {
-	http.HandleFunc("/", server.entryPointHandler)
-	httpServer := &http.Server{Addr: fmt.Sprintf("%s:%d", ip, port), Handler: nil}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", server.entryPointHandler)
+	httpServer := &http.Server{Addr: fmt.Sprintf("%s:%d", ip, port), Handler: mux}
 	go httpServer.ListenAndServe()
 
 	server.IsRunning = true

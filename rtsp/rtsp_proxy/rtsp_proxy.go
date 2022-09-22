@@ -1,6 +1,7 @@
 package rtsp_proxy
 
 import (
+	"errors"
 	"math/rand"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
@@ -15,19 +16,15 @@ type RtspProxy struct {
 }
 
 func Create() RtspProxy {
-	client := rtsp_client.Create()
 	server := rtsp_server.Create()
 
-	proxy := RtspProxy{SessionId: rand.Int63(), RtspClient: client, RtspServer: server}
+	proxy := RtspProxy{SessionId: rand.Int63(), RtspServer: server}
 
 	return proxy
 }
 
-func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int, transport string) error {
-	client := proxy.RtspClient
-	server := proxy.RtspServer
-
-	err := server.Start("", localRtspPort, 0)
+func (proxy *RtspProxy) ProxyFromRtspClient(client *rtsp_client.RtspClient, localRtspPort int) error {
+	err := proxy.RtspServer.Start("", localRtspPort, 0)
 	if err != nil {
 		return err
 	}
@@ -36,38 +33,48 @@ func (proxy *RtspProxy) Start(remoteRtspAddress string, localRtspPort int, trans
 
 	go proxy.run()
 
-	//err = client.Connect(remoteRtspAddress, rtsp_client.RtspTransportTcp)
-	err = client.Connect(remoteRtspAddress, transport)
 	if err != nil {
 		return err
 	}
 
-	_, err = client.Describe()
-	if err != nil {
-		return err
+	if !client.IsConnected {
+		return errors.New("rtsp proxy #%d: RTSP клиент должен быть подключен перед запуском прокирования")
 	}
 
-	_, err = client.Options()
-	if err != nil {
-		return err
-	}
+	if !client.IsPlaying {
+		_, err = client.Describe()
+		if err != nil {
+			return err
+		}
 
-	//time.Sleep(1 * time.Second)
+		_, err = client.Options()
+		if err != nil {
+			return err
+		}
 
-	//TODO Использование задержки недопустимо. Необходимо сделать так, чтобы после выполнение options запускался setup метод
-	_, err = client.Setup()
-	if err != nil {
-		return err
-	}
+		_, err = client.Setup()
+		if err != nil {
+			return err
+		}
 
-	//time.Sleep(1 * time.Second)
-
-	_, err = client.Play()
-	if err != nil {
-		return err
+		_, err = client.Play()
+		if err != nil {
+			return err
+		}
 	}
 
 	return err
+}
+
+func (proxy *RtspProxy) ProxyFromAddress(remoteRtspAddress string, localRtspPort int, remoteTransport string) error {
+	client := rtsp_client.Create()
+	proxy.RtspClient = client
+	err := client.Connect(remoteRtspAddress, remoteTransport)
+	if err != nil {
+		return err
+	}
+
+	return proxy.ProxyFromRtspClient(client, localRtspPort)
 }
 
 func (proxy *RtspProxy) Stop() error {

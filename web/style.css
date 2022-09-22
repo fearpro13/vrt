@@ -2,6 +2,14 @@
     display: flex;
     flex-direction: row;
 }
+video{
+    /*//width: 15%;*/
+}
+.video_panel{
+    width: 50%;
+    display: grid;
+    grid-template-columns: 2fr auto;
+}
 .log{
     display: flex;
     flex-direction: column;
