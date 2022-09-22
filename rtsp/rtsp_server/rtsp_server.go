@@ -74,8 +74,6 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 	server.StreamAddress = streamAddress
 	server.IsRunning = true
 
-	//go server.run()
-
 	logger.Info(fmt.Sprintf("RTSP server started at %s", rtspAddress))
 
 	return err
@@ -92,32 +90,6 @@ func (server *RtspServer) Stop() error {
 
 	return err
 }
-
-//func (server *RtspServer) sync() {
-//	var block sync.Mutex
-//
-//	for server.IsRunning {
-//		for _, tcpClient := range server.Server.Clients {
-//			block.Lock()
-//			currClient, alreadyMapped := server.Clients[tcpClient.SessionId]
-//			block.Unlock()
-//			if !alreadyMapped {
-//				client := rtspClient.Create()
-//				//TODO Добавить метод createFromTcpConnection для rtspClient
-//				client.TcpClient = tcpClient
-//				client.IsConnected = true
-//				server.Clients[tcpClient.SessionId] = &client
-//
-//				logger.Info(fmt.Sprintf("RTSP client #%d connected", client.SessionId))
-//			} else if !currClient.IsConnected {
-//				delete(server.Clients, tcpClient.SessionId)
-//				logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", currClient.SessionId))
-//				logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
-//			}
-//		}
-//		time.Sleep(time.Millisecond * 5)
-//	}
-//}
 
 func (server *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.TcpClient) {
 	client := rtspClient.CreateFromConnection(connectedTcpClient)
@@ -151,32 +123,6 @@ func (server *RtspServer) handleRtspClient(rtspClient *rtspClient.RtspClient) {
 		}
 	}
 }
-
-//func (server *RtspServer) run() {
-//	for server.IsRunning {
-//		for _, client := range server.Clients {
-//			bytes, err := client.TcpClient.IO.Read([]byte{0})
-//			if err != nil {
-//				logger.Error(err.Error())
-//			}
-//			message := string(bytes)
-//			if message != "" {
-//				response, err := parseRequest(server, client, message)
-//				if err != nil {
-//					logger.Error(err.Error())
-//				}
-//				if response != "" {
-//					_, err = client.TcpClient.Send(response)
-//					if err != nil {
-//						logger.Error(err.Error())
-//					}
-//				}
-//			}
-//
-//		}
-//		time.Sleep(time.Millisecond * 5)
-//	}
-//}
 
 func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request string) (response string, err error) {
 	requestLines := strings.Split(request, "\r\n")
@@ -235,16 +181,34 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 	}
 
 	if method == "setup" {
-		transportExp, err := regexp.Compile("(\\d+)-(\\d+)")
-		if err != nil {
-			return "", nil
+		transportExp := regexp.MustCompile("[rR][tT][pP]\\/[aA][vV][pP]\\/([tT][cC][pP])")
+		if !transportExp.MatchString(request) {
+			return "", errors.New(fmt.Sprintf("rtsp server #%d: Could not detect transport protocol", server.SessionId))
 		}
-		portMatches := transportExp.FindStringSubmatch(request)
-		clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
-		clientRtpPortRightInt64, err := strconv.ParseInt(portMatches[2], 10, 64)
+		transport := strings.ToLower(transportExp.FindStringSubmatch(request)[1])
 
-		clientRtpPortLeftInt := int(clientRtpPortLeftInt64)
-		clientRtpPortRightInt := int(clientRtpPortRightInt64)
+		switch transport {
+		case rtspClient.RtspTransportTcp:
+			client.Transport = rtspClient.RtspTransportTcp
+			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
+		case rtspClient.RtspTransportUdp:
+			client.Transport = rtspClient.RtspTransportUdp
+
+			transportPortExp, err := regexp.Compile("(\\d+)-(\\d+)")
+			if err != nil {
+				return "", nil
+			}
+			portMatches := transportPortExp.FindStringSubmatch(request)
+			clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
+			clientRtpPortRightInt64, err := strconv.ParseInt(portMatches[2], 10, 64)
+
+			clientRtpPortLeftInt := int(clientRtpPortLeftInt64)
+			clientRtpPortRightInt := int(clientRtpPortRightInt64)
+
+			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
+		default:
+			return "", errors.New(fmt.Sprintf("rtsp server #%d: transport %s is not supported", server.SessionId, transport))
+		}
 
 		session := client.SessionId
 
@@ -253,9 +217,9 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 
 		response = "RTSP/1.0 200 OK\r\n" +
 			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			fmt.Sprintf("Session: %d;timeout=60\r\n", session) +
-			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1) +
-			"Content-Length: 0\r\n\r\n"
+			fmt.Sprintf("Session: %d;timeout=60\r\n", session)
+
+		response += "Content-Length: 0\r\n\r\n"
 	}
 
 	if method == "play" {
