@@ -21,14 +21,12 @@ type TcpClient struct {
 	IO           *bufio.ReadWriter
 	IsConnected  bool
 	OnDisconnect onDisconnectCallback
-	//RecvBuff    chan []byte
 }
 
 func Create() *TcpClient {
 	id := rand.Int63()
 	client := &TcpClient{
 		SessionId: id,
-		//RecvBuff: make(chan []byte, 65535),
 	}
 
 	//logger.Junk(fmt.Sprintf("TCP client #%d Created", id))
@@ -77,12 +75,29 @@ func (client *TcpClient) Connect(ip string, port int) error {
 
 	logger.Debug(fmt.Sprintf("TCP client #%d: Connected to %s:%d", client.SessionId, ip, port))
 
-	//go client.run()
-
 	return err
 }
 
-func (client *TcpClient) Send(message string) (bytesWritten int, err error) {
+func (client *TcpClient) Send(bytes []byte) (bytesWritten int, err error) {
+	bytesWritten, err = client.IO.Write(bytes)
+	if err != nil {
+		if err == io.EOF {
+			err = client.Disconnect()
+		}
+		return 0, err
+	}
+
+	err = client.IO.Flush()
+	if err != nil {
+		return 0, err
+	}
+
+	logger.Junk(fmt.Sprintf("TCP client #%d: Sent %d bytes to %s:%d", client.SessionId, bytesWritten, client.Ip, client.Port))
+
+	return bytesWritten, err
+}
+
+func (client *TcpClient) SendString(message string) (bytesWritten int, err error) {
 	bytesWritten, err = client.IO.WriteString(message)
 	if err != nil {
 		if err == io.EOF {
@@ -132,9 +147,7 @@ func (client *TcpClient) ReadLine() (message string, err error) {
 	messageBytes, _, err := client.IO.ReadLine()
 
 	if err != nil {
-		if err == io.EOF {
-			err = client.Disconnect()
-		}
+		err = client.Disconnect()
 		return "", err
 	}
 

@@ -172,14 +172,6 @@ func (client *RtspClient) Disconnect() error {
 	return nil
 }
 
-//DEPRECATED changed to channel reader and channel subscribers
-
-//func (client *RtspClient) ReadMessage() (message string, err error) {
-//	message, err = client.TcpClient.ReadMessage()
-//	parseSdp(client, &message)
-//	return message, err
-//}
-
 func (client *RtspClient) Describe() (response string, err error) {
 	message := ""
 	message += fmt.Sprintf("DESCRIBE %s RTSP/1.0\r\n", client.RemoteAddress)
@@ -188,7 +180,7 @@ func (client *RtspClient) Describe() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 	if err != nil {
 		return "", nil
 	}
@@ -215,7 +207,7 @@ func (client *RtspClient) Options() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 
 	if err != nil {
 		return "", nil
@@ -250,7 +242,7 @@ func (client *RtspClient) Setup() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 
 	response, err = client.ReadMessage()
 
@@ -284,7 +276,7 @@ func (client *RtspClient) Play() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 
 	if err != nil {
 		return "", err
@@ -330,7 +322,7 @@ func (client *RtspClient) Pause() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 	if err != nil {
 		return "", err
 	}
@@ -349,7 +341,7 @@ func (client *RtspClient) TearDown() (response string, err error) {
 	message += "\r\n"
 
 	client.CSeq++
-	_, err = client.TcpClient.Send(message)
+	_, err = client.TcpClient.SendString(message)
 	if err != nil {
 		return "", err
 	}
@@ -376,26 +368,14 @@ func (client *RtspClient) ReadMessage() (message string, err error) {
 	hasContent := false
 	var contentLen int
 
-	//statusLineExp := regexp.MustCompile("^[rR][tT][sS][pP]/(\\d\\.\\d)\\s+(\\d+)\\s+(\\w+)$")
 	firstResponseLine, err := client.TcpClient.ReadLine()
 	if err != nil {
-		if err == io.EOF {
-			err = client.Disconnect()
-			if err != nil {
-				return "", err
-			}
+		err = client.Disconnect()
+		if err != nil {
+			return "", err
 		}
 		return "", err
 	}
-	//
-	//parsedStatusLine := statusLineExp.FindStringSubmatch(firstResponseLine)
-	////rtspVersion := parsedFirstLine[1]
-	//responseStatus := parsedStatusLine[2]
-	//responseDescription := parsedStatusLine[3]
-	//
-	//if responseStatus != "200" {
-	//	return "", errors.New(responseStatus + " " + responseDescription)
-	//}
 
 	message += firstResponseLine + "\r\n"
 
@@ -451,27 +431,8 @@ func parseSdp(client *RtspClient, message *string) {
 			}
 		}
 		client.VideoIDX = int8(len(client.Codecs) - 1)
-		//client.videoID = client.chTMP
 	}
 
-	//lines := strings.Split(*message, "\r\n")
-	//for _, line := range lines {
-	//	matches, _ := regexp.MatchString("a=control", line)
-	//	if matches {
-	//		//a=control:rtsp://stream:Tv4m6ag6@10.3.43.140:554/trackID=1
-	//		remoteStreamAddressExp, _ := regexp.Compile(":(.+)")
-	//		remoteStreamAddress := remoteStreamAddressExp.FindStringSubmatch(line)[1]
-	//		client.RemoteStreamAddress = remoteStreamAddress
-	//	}
-	//
-	//	matches, _ = regexp.MatchString("Session.*:.*\\d+", line)
-	//	if matches {
-	//		sessionIdExp, _ := regexp.Compile("\\d+")
-	//		sessionIdString := sessionIdExp.FindString(line)
-	//		sessionIdInt64, _ := strconv.ParseInt(sessionIdString, 10, 64)
-	//		client.SessionId = sessionIdInt64
-	//	}
-	//}
 }
 
 func (client *RtspClient) SubscribeToRtpBuff(uid int64, subscriber RtpSubscriber) {
@@ -514,18 +475,14 @@ func (client *RtspClient) run() {
 
 				rtpPacket := make([]byte, contentLen+4)
 				copy(rtpPacket, header)
-				copy(rtpPacket, rtpContent)
+				copy(rtpPacket[4:], rtpContent)
 
-				//rtpPacket := extractInterleavedFrame(content)
 				client.RTPChan <- rtpPacket
 			} else {
 				logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
 			}
 		}
 		if client.Transport == RtspTransportUdp {
-			//content := <-client.RtpServer.RecvBuff
-			//rtpPacket := extractInterleavedFrame(content)
-
 			client.RTPChan <- <-client.RtpServer.RecvBuff
 		}
 	}

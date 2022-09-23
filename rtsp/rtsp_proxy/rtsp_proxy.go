@@ -1,6 +1,7 @@
 package rtsp_proxy
 
 import (
+	"encoding/binary"
 	"errors"
 	"math/rand"
 	"vrt/logger"
@@ -107,17 +108,69 @@ func (proxy *RtspProxy) run() {
 		}
 
 		for _, client := range rtspServer.Clients {
-			if client.RtpClient.IsConnected {
-				cpyBuff := make([]byte, 2048)
-				bytesCopied := copy(cpyBuff, bytes)
-				cpyBuff = cpyBuff[:bytesCopied]
+			if !client.IsConnected || !client.IsPlaying {
+				continue
+			}
 
-				err := client.RtpClient.Send(cpyBuff)
-				if err != nil {
-					logger.Error(err.Error())
-					err = client.Disconnect()
+			cpyBuff := make([]byte, len(bytes))
+			copy(cpyBuff, bytes)
+
+			if client.Transport == rtsp_client.RtspTransportTcp {
+				if !client.TcpClient.IsConnected {
+					continue
+				}
+
+				if cpyBuff[0] == 0x24 {
+					_, err := client.TcpClient.Send(cpyBuff)
 					if err != nil {
 						logger.Error(err.Error())
+						err = client.Disconnect()
+						if err != nil {
+							logger.Error(err.Error())
+						}
+					}
+				} else {
+					buff := make([]byte, len(bytes)+4)
+					header := make([]byte, 4)
+					header[0] = 0x24
+					header[1] = 0
+					binary.BigEndian.PutUint16(header[2:4], uint16(len(bytes)))
+					copy(buff, header)
+					copy(buff[4:], cpyBuff)
+
+					_, err := client.TcpClient.Send(buff)
+					if err != nil {
+						logger.Error(err.Error())
+						err = client.Disconnect()
+						if err != nil {
+							logger.Error(err.Error())
+						}
+					}
+				}
+			}
+
+			if client.Transport == rtsp_client.RtspTransportUdp {
+				if !client.RtpClient.IsConnected {
+					continue
+				}
+
+				if cpyBuff[0] == 0x24 {
+					err := client.RtpClient.Send(cpyBuff[4:])
+					if err != nil {
+						logger.Error(err.Error())
+						err = client.Disconnect()
+						if err != nil {
+							logger.Error(err.Error())
+						}
+					}
+				} else {
+					err := client.RtpClient.Send(cpyBuff)
+					if err != nil {
+						logger.Error(err.Error())
+						err = client.Disconnect()
+						if err != nil {
+							logger.Error(err.Error())
+						}
 					}
 				}
 			}
@@ -138,7 +191,7 @@ func (proxy *RtspProxy) run() {
 	//				bytesCopied := copy(cpyBuff, lockedBuff)
 	//				cpyBuff = cpyBuff[:bytesCopied]
 	//
-	//				err := client.RtpClient.Send(cpyBuff)
+	//				err := client.RtpClient.SendString(cpyBuff)
 	//				if err != nil {
 	//					logger.Error(err.Error())
 	//					err = client.Disconnect()

@@ -14,6 +14,7 @@ import (
 	"vrt/tcp/tcp_client"
 	"vrt/tcp/tcp_server"
 	"vrt/udp/udp_client"
+	"vrt/udp/udp_server"
 )
 
 type RtspServer struct {
@@ -26,9 +27,9 @@ type RtspServer struct {
 	RtspAddress   string
 	StreamAddress string
 	RtpClient     *udp_client.UdpClient
-	RtpServer     *tcp_server.TcpServer
+	RtpServer     *udp_server.UdpServer
 	RtpLocalPort  int
-	RtcpServer    *tcp_server.TcpServer
+	RtcpServer    *udp_server.UdpServer
 	RtcpLocalPort int
 	sync.Mutex
 	Clients   map[int64]*rtspClient.RtspClient
@@ -60,11 +61,11 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 	random := rand.Uint32()
 	randomPort := int(random >> 16)
 
-	rtpServer := tcp_server.Create()
+	rtpServer := udp_server.Create()
 	err = rtpServer.Start(ip, randomPort)
 	server.RtpServer = &rtpServer
 
-	rtcpServer := tcp_server.Create()
+	rtcpServer := udp_server.Create()
 	err = rtcpServer.Start(ip, randomPort+1)
 	server.RtcpServer = &rtcpServer
 
@@ -108,7 +109,7 @@ func (server *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.TcpCl
 }
 
 func (server *RtspServer) handleRtspClient(rtspClient *rtspClient.RtspClient) {
-	for !rtspClient.IsPlaying {
+	for rtspClient.IsConnected && !rtspClient.IsPlaying {
 		request, err := rtspClient.ReadMessage()
 		if err != nil {
 			logger.Error(err.Error())
@@ -117,7 +118,7 @@ func (server *RtspServer) handleRtspClient(rtspClient *rtspClient.RtspClient) {
 		if err != nil {
 			logger.Error(err.Error())
 		}
-		_, err = rtspClient.TcpClient.Send(response)
+		_, err = rtspClient.TcpClient.SendString(response)
 		if err != nil {
 			logger.Error(err.Error())
 		}
@@ -136,7 +137,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 	method := strings.ToLower(methodExp.FindString(requestLines[0]))
 
 	if method == "" {
-		return "", errors.New(fmt.Sprintf("rtsp server #%d: Некорректный метод запроса %s", server.SessionId, method))
+		return "", errors.New(fmt.Sprintf("rtsp server #%d: Некорректный метод запроса %s", server.SessionId, requestLines[0]))
 	}
 
 	now := time.Now()
@@ -181,16 +182,17 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 	}
 
 	if method == "setup" {
-		transportExp := regexp.MustCompile("[rR][tT][pP]\\/[aA][vV][pP]\\/([tT][cC][pP])")
+		transportExp := regexp.MustCompile("[rR][tT][pP]\\/[aA][vV][pP]\\/(\\w+)")
 		if !transportExp.MatchString(request) {
 			return "", errors.New(fmt.Sprintf("rtsp server #%d: Could not detect transport protocol", server.SessionId))
 		}
 		transport := strings.ToLower(transportExp.FindStringSubmatch(request)[1])
 
+		transportInfo := ""
 		switch transport {
 		case rtspClient.RtspTransportTcp:
 			client.Transport = rtspClient.RtspTransportTcp
-			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
+			transportInfo = fmt.Sprintf("Transport: RTP/AVP/TCP;unicast;interleaved=0-1;ssrc=60d45a65;mode=\"play\"\r\n")
 		case rtspClient.RtspTransportUdp:
 			client.Transport = rtspClient.RtspTransportUdp
 
@@ -205,19 +207,18 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 			clientRtpPortLeftInt := int(clientRtpPortLeftInt64)
 			clientRtpPortRightInt := int(clientRtpPortRightInt64)
 
-			fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
+			err = client.RtpClient.Connect(client.TcpClient.Ip, clientRtpPortLeftInt)
+			serverRtpPort := client.RtpClient.LocalPort
+
+			transportInfo = fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
 		default:
 			return "", errors.New(fmt.Sprintf("rtsp server #%d: transport %s is not supported", server.SessionId, transport))
 		}
 
-		session := client.SessionId
-
-		err = client.RtpClient.Connect(client.TcpClient.Ip, clientRtpPortLeftInt)
-		serverRtpPort := client.RtpClient.LocalPort
-
 		response = "RTSP/1.0 200 OK\r\n" +
+			transportInfo +
 			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			fmt.Sprintf("Session: %d;timeout=60\r\n", session)
+			fmt.Sprintf("Session: %d;timeout=60\r\n", client.SessionId)
 
 		response += "Content-Length: 0\r\n\r\n"
 	}
