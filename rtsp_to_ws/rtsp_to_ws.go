@@ -109,9 +109,9 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 
 				_, hRaw, _ := muxer.WritePacket(*packet, false)
 
-				//if len(hRaw) > 0 {
-				client.Send(websocket.BinaryMessage, hRaw)
-				//}
+				if len(hRaw) > 0 {
+					client.Send(websocket.BinaryMessage, hRaw)
+				}
 
 			}
 		})

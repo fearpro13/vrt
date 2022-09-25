@@ -1,18 +1,14 @@
 class websocketStream {
-    constructor(address,playerId,log) {
-        let video = document.getElementById(playerId)
+    constructor(address,playerId) {
+        this.connect(address)
+        this.init(playerId)
 
-        if (video === undefined || video === null) {
-            log(`DOM element with id ${playerId} not found`)
-            return
-        }
+        this.address = address
+        this.playerId = playerId
+    }
 
-        this.mediaSource = new MediaSource()
-        this.sourceBuffer = null
-        this.streamingStarted = false;
-        this.queue = [];
-
-        video.src = URL.createObjectURL(this.mediaSource)
+    connect = (address) => {
+        let log = this.log
 
         this.ws = new WebSocket(address)
         this.ws.binaryType = 'arraybuffer';
@@ -41,10 +37,45 @@ class websocketStream {
                 this.sourceBuffer = this.mediaSource.addSourceBuffer('video/mp4; codecs="' + mimeCodec + '"');
                 this.sourceBuffer.mode = "segments"
                 this.sourceBuffer.addEventListener("updateend", this.loadPacket);
+                this.sourceBuffer.addEventListener('error',()=>{
+                    this.disconnect()
+                    this.destroy()
+                    this.connect(address)
+                    this.init(this.playerId)
+                })
             } else {
                 this.pushPacket(event.data);
             }
         };
+    }
+
+    disconnect = () => {
+        this.ws.close(0,"Disconnected manually")
+    }
+
+    destroy = () => {
+        delete this.mediaSource
+        delete this.sourceBuffer
+        delete this.streamingStarted
+        delete this.queue
+        delete this.video
+    }
+
+    init = (playerId) => {
+        let video = document.getElementById(playerId)
+
+        if (video === undefined || video === null) {
+            this.log(`DOM element with id ${playerId} not found`)
+            return
+        }
+
+        this.mediaSource = new MediaSource()
+        this.sourceBuffer = null
+        this.streamingStarted = false;
+        this.queue = [];
+
+        video.src = URL.createObjectURL(this.mediaSource)
+        this.video = video
     }
 
     pushPacket = (packet) => {
@@ -69,10 +100,8 @@ class websocketStream {
             }
         }
     }
-}
 
-window.addEventListener('load', () => {
-    let log = (message) => {
+    log = (message) => {
         let now = new Date()
         let nowFormatted = now.toLocaleString()
         let log = document.getElementById('log')
@@ -83,10 +112,12 @@ window.addEventListener('load', () => {
 
         log.appendChild(logLine)
     }
+}
 
-    new websocketStream("ws://0.0.0.0:6061",'video_tcp',log)
-    new websocketStream("ws://0.0.0.0:6062",'video_udp',log)
-    new websocketStream("ws://0.0.0.0:6063",'video_proxy_tcp',log)
-    new websocketStream("ws://0.0.0.0:6064",'video_proxy_udp',log)
+window.addEventListener('load', () => {
+    new websocketStream("ws://0.0.0.0:6061",'video_tcp')
+    new websocketStream("ws://0.0.0.0:6062",'video_udp')
+    new websocketStream("ws://0.0.0.0:6063",'video_proxy_tcp')
+    new websocketStream("ws://0.0.0.0:6064",'video_proxy_udp')
 })
 

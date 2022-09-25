@@ -36,9 +36,6 @@ func main() {
 
 	address := os.Args[1]
 
-	//s := rtsp_server.Create()
-	//s.Start("", 0, 0)
-
 	//////////////////////////////////////////////////////
 	rtspProxyTcp := rtsp_proxy.Create()
 	err := rtspProxyTcp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportTcp)
