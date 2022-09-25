@@ -29,8 +29,6 @@ func Create() *TcpClient {
 		SessionId: id,
 	}
 
-	//logger.Junk(fmt.Sprintf("TCP client #%d Created", id))
-
 	return client
 }
 
@@ -54,7 +52,7 @@ func CreateFromConnection(connection *net.TCPConn) (client *TcpClient, err error
 	client.IO = bufio.NewReadWriter(bufio.NewReader(connection), bufio.NewWriter(connection))
 	client.IsConnected = true
 
-	//go client.run()
+	logger.Debug(fmt.Sprintf("TCP client #%d: Connected to %s:%d", client.SessionId, assignedIpString, assignedPortInt))
 
 	return client, err
 }
@@ -67,8 +65,18 @@ func (client *TcpClient) Connect(ip string, port int) error {
 		return nil
 	}
 
-	client.Ip = ip
-	client.Port = port
+	remoteAddress := connection.RemoteAddr().String()
+	remoteAddressArray := strings.Split(remoteAddress, ":")
+	remoteIpString := remoteAddressArray[0]
+	remotePortString := remoteAddressArray[1]
+	remotePortInt, err := strconv.Atoi(remotePortString)
+
+	if err != nil {
+		return err
+	}
+
+	client.Ip = remoteIpString
+	client.Port = remotePortInt
 	client.Socket = connection
 	client.IO = bufio.NewReadWriter(bufio.NewReader(connection), bufio.NewWriter(connection))
 	client.IsConnected = true
@@ -158,36 +166,6 @@ func (client *TcpClient) ReadLine() (message string, err error) {
 	return message, err
 }
 
-//DEPRECATED To read message you have to know protocol specifics and protocol message ending
-
-//func (client *TcpClient) ReadMessage() (message string, err error) {
-//	bytes := make([]byte, 65535)
-//
-//	var bytesReadTotal, bytesReadCurrent int
-//	var bytesTotal []byte
-//	var endReached = false
-//
-//	for !endReached {
-//		bytesReadCurrent, err = client.Socket.Read(bytes)
-//		bytesReadTotal += bytesReadCurrent
-//		bytesTotal = append(bytesTotal, bytes...)
-//
-//		endReached = bytesReadCurrent == 0
-//		bytes = bytes[:0]
-//	}
-//
-//	if bytesReadTotal == 0 {
-//		return "", nil
-//	}
-//
-//	message = string(bytesTotal)
-//
-//	logger.Junk(fmt.Sprintf("TCP client #%d: Received %d bytes from %s:%d", client.SessionId, bytesReadTotal, client.Ip, client.Port))
-//	logger.Junk(message)
-//
-//	return message, err
-//}
-
 func (client *TcpClient) Disconnect() error {
 	client.IsConnected = false
 
@@ -201,14 +179,3 @@ func (client *TcpClient) Disconnect() error {
 
 	return err
 }
-
-//
-//func (client *TcpClient) run() {
-//	for client.IsConnected {
-//		bytes, _, err := client.ReadBytes()
-//		if err != nil {
-//			logger.Error(err.Error())
-//		}
-//		client.RecvBuff <- bytes
-//	}
-//}

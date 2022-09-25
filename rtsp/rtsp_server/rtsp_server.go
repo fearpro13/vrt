@@ -56,18 +56,17 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 
 	rtpClient := udp_client.Create()
 	rtpClient.LocalPort = rtpClientLocalPort
-	server.RtpClient = &rtpClient
+	server.RtpClient = rtpClient
 
-	random := rand.Uint32()
-	randomPort := int(random >> 16)
+	randomPort := rand.Intn(64000) + 1024
 
 	rtpServer := udp_server.Create()
 	err = rtpServer.Start(ip, randomPort)
-	server.RtpServer = &rtpServer
+	server.RtpServer = rtpServer
 
 	rtcpServer := udp_server.Create()
 	err = rtcpServer.Start(ip, randomPort+1)
-	server.RtcpServer = &rtcpServer
+	server.RtcpServer = rtcpServer
 
 	rtspAddress := fmt.Sprintf("rtsp://%s:%s@%s:%d", server.Login, server.Password, tcpServer.Ip, tcpServer.Port)
 	streamAddress := rtspAddress + "/" + "stream1"

@@ -19,10 +19,10 @@ type UdpClient struct {
 	IsConnected bool
 }
 
-func Create() UdpClient {
+func Create() *UdpClient {
 	id := rand.Int63()
-	logger.Junk(fmt.Sprintf("UDP client #%d created", id))
-	return UdpClient{Id: id}
+	udpClient := &UdpClient{Id: id}
+	return udpClient
 }
 
 func (client *UdpClient) Connect(ip string, port int) error {

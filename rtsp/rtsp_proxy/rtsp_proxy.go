@@ -102,10 +102,14 @@ func (proxy *RtspProxy) run() {
 	rtspServer := proxy.RtspServer
 	rtspClient := proxy.RtspClient
 
-	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytes []byte) {
+	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytesPtr *[]byte, num int) {
+		bytes := *bytesPtr
+
 		if len(bytes) == 0 {
 			return
 		}
+
+		//logger.Debug(fmt.Sprintf("Receivev RTP packet #%d", num))
 
 		for _, client := range rtspServer.Clients {
 			if !client.IsConnected || !client.IsPlaying {
@@ -176,36 +180,4 @@ func (proxy *RtspProxy) run() {
 			}
 		}
 	})
-
-	//for proxy.IsRunning {
-	//	if rtspClient.RtpServer.IsRunning {
-	//		recvRtpBuff = <-rtspClient.RtpServer.RecvBuff
-	//
-	//		lockedBuff := make([]byte, 2048)
-	//		lockedBytes := copy(lockedBuff, recvRtpBuff)
-	//		lockedBuff = lockedBuff[:lockedBytes]
-	//
-	//		for _, client := range rtspServer.Clients {
-	//			if len(lockedBuff) > 0 && client.RtpClient.IsConnected {
-	//				cpyBuff := make([]byte, 2048)
-	//				bytesCopied := copy(cpyBuff, lockedBuff)
-	//				cpyBuff = cpyBuff[:bytesCopied]
-	//
-	//				err := client.RtpClient.SendString(cpyBuff)
-	//				if err != nil {
-	//					logger.Error(err.Error())
-	//					err = client.Disconnect()
-	//					if err != nil {
-	//						logger.Error(err.Error())
-	//					}
-	//				}
-	//
-	//				recvRtpBuff = recvRtpBuff[:0]
-	//			}
-	//		}
-	//
-	//		lockedBuff = lockedBuff[:0]
-	//	}
-	//	time.Sleep(time.Millisecond * 1)
-	//}
 }

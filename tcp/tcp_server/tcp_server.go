@@ -27,8 +27,6 @@ func Create() (server TcpServer) {
 	id := rand.Int63()
 	server = TcpServer{Id: id}
 
-	logger.Junk(fmt.Sprintf("TCP Server #%d created", id))
-
 	return server
 }
 

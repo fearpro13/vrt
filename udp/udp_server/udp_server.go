@@ -18,10 +18,11 @@ type UdpServer struct {
 	RecvBuff  chan []byte
 }
 
-func Create() UdpServer {
+func Create() *UdpServer {
 	id := rand.Int63()
-	logger.Junk(fmt.Sprintf("Created Udp server #%d", id))
-	return UdpServer{Id: id, IsRunning: false}
+	udpServer := &UdpServer{Id: id, IsRunning: false}
+
+	return udpServer
 }
 
 func (server *UdpServer) Start(ip string, port int) error {

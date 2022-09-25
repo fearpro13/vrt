@@ -73,13 +73,19 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 
 		//var timeLine = make(map[int8]time.Duration)
 
-		rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytes []byte) {
+		rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytesPtr *[]byte, num int) {
+			bytes := *bytesPtr
 			if len(bytes) == 0 {
 				return
 			}
 
+			//logger.Debug(fmt.Sprintf("Received RTP packet #%d", num))
+
 			var packets []*av.Packet
-			if bytes[0] != 0x24 {
+			if bytes[0] == 0x24 {
+				//logger.Debug(fmt.Sprintf("%d %d %d %d", bytes[0], bytes[1], bytes[2], bytes[3]))
+				packets, _ = rtpDemux(rtspClient, &bytes)
+			} else {
 				interleavedFakeFrame := make([]byte, 4)
 				interleavedFakeFrame[0] = 36
 				interleavedFakeFrame[1] = bytes[1] //96 = videoID RTP format from SDP
@@ -92,8 +98,6 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 				copy(rtpRaw[4:], bytes)
 
 				packets, _ = rtpDemux(rtspClient, &rtpRaw)
-			} else {
-				packets, _ = rtpDemux(rtspClient, &bytes)
 			}
 
 			for _, packet := range packets {
@@ -107,7 +111,10 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 				//timeLine[packet.Idx] += packet.Duration
 				//packet.Time = timeLine[packet.Idx]
 
-				_, hRaw, _ := muxer.WritePacket(*packet, false)
+				_, hRaw, err := muxer.WritePacket(*packet, false)
+				if err != nil {
+					logger.Error(err.Error())
+				}
 
 				if len(hRaw) > 0 {
 					client.Send(websocket.BinaryMessage, hRaw)
@@ -120,33 +127,6 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server started", rtspClient.SessionId, wsServer.SessionId))
 
 	return broadcast
-}
-
-func BroadcastRtspToWebsockets(rtspAddress string, wsServer *ws_server.WSServer) {
-
-}
-
-func extractRTPFromInterleavedFrame(header []byte) []byte {
-	h0 := header[0]
-	switch h0 {
-	case 0x24:
-		length := int32(binary.BigEndian.Uint16(header[2:]))
-		if length > 65535 || length < 12 {
-			logger.Error("RTSP Client RTP Incorrect Packet Size")
-			return []byte{}
-		}
-		content := make([]byte, length+4)
-		content[0] = header[0]
-		content[1] = header[1]
-		content[2] = header[2]
-		content[3] = header[3]
-		content = append(content, header[4:]...)
-
-		return content
-	default:
-		logger.Error("RTSP Client RTP Read DeSync")
-		return []byte{}
-	}
 }
 
 func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Packet, bool) {
@@ -297,7 +277,7 @@ func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 						}
 					}
 				default:
-					logger.Warning(fmt.Sprintf("Unsupported NAL Type %d", naluType))
+					logger.Debug(fmt.Sprintf("Unsupported NAL Type %d", naluType))
 				}
 			}
 		}

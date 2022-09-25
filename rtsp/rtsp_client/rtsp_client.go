@@ -33,6 +33,8 @@ type RtspClient struct {
 	CSeq                          int
 	RemoteAddress                 string
 	RemoteStreamAddress           string
+	LocalRtpServerPort            int
+	RemoteRtpServerPort           int //required for udp hair pinning
 	IsConnected                   bool
 	IsPlaying                     bool
 	StartVideoTimestamp           int64
@@ -44,11 +46,12 @@ type RtspClient struct {
 	VideoCodec                    av.CodecType
 	VideoIDX                      int8
 	RtpSubscribers                map[int64]RtpSubscriber
-	RTPChan                       chan []byte
+	RTPVideoChan                  chan []byte
+	RTPAudioChan                  chan []byte
 	OnDisconnect                  OnDisconnectCallback
 }
 
-type RtpSubscriber func([]byte)
+type RtpSubscriber func(*[]byte, int)
 
 func Create() *RtspClient {
 	sessionId := rand.Int63()
@@ -60,10 +63,11 @@ func Create() *RtspClient {
 		SessionId:      sessionId,
 		CSeq:           1,
 		TcpClient:      tcpClient,
-		RtpServer:      &udpServer,
-		RtpClient:      &udpClient,
+		RtpServer:      udpServer,
+		RtpClient:      udpClient,
 		RtpSubscribers: map[int64]RtpSubscriber{},
-		RTPChan:        make(chan []byte, 4096),
+		RTPVideoChan:   make(chan []byte, 1024),
+		RTPAudioChan:   make(chan []byte, 1024),
 	}
 
 	return rtspClient
@@ -199,10 +203,6 @@ func (client *RtspClient) Options() (response string, err error) {
 	message += fmt.Sprintf("OPTIONS %s RTSP/1.0\r\n", client.RemoteAddress)
 	message += fmt.Sprintf("CSeq: %d\r\n", client.CSeq)
 
-	//if client.Transport == RtspTransportTcp {
-	//	message += "Require: implicit-play\r\n"
-	//}
-
 	message += "Accept: application/sdp\r\n"
 	message += "\r\n"
 
@@ -227,16 +227,9 @@ func (client *RtspClient) Setup() (response string, err error) {
 
 	if client.Transport == RtspTransportUdp {
 		randPortInt := rand.Intn(64000) + 1024
-		err = client.RtpServer.Start("", randPortInt-(randPortInt%2))
+		client.LocalRtpServerPort = randPortInt
 
-		if err != nil {
-			return "", err
-		}
-
-		portMin := client.RtpServer.Port
-		portMax := portMin + 1
-
-		message += fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d\r\n", portMin, portMax)
+		message += fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d\r\n", randPortInt, randPortInt+1)
 	}
 
 	message += "\r\n"
@@ -248,6 +241,15 @@ func (client *RtspClient) Setup() (response string, err error) {
 
 	lines := strings.Split(response, "\r\n")
 	for _, line := range lines {
+		serverPortExp := regexp.MustCompile("server_port=(\\d+)-(\\d+)")
+		if serverPortExp.MatchString(line) {
+			serverPort := serverPortExp.FindStringSubmatch(line)[1]
+			client.RemoteRtpServerPort, err = strconv.Atoi(serverPort)
+			if err != nil {
+				return "", err
+			}
+		}
+
 		sessionExp := regexp.MustCompile("^[sS]ession:\\s+(\\d+)")
 		if sessionExp.MatchString(line) {
 			sessionIdString := sessionExp.FindStringSubmatch(line)[1]
@@ -256,7 +258,35 @@ func (client *RtspClient) Setup() (response string, err error) {
 				return "", err
 			}
 			client.SessionId = int64(sessionIdInt)
-			break
+		}
+	}
+
+	if client.Transport == RtspTransportUdp {
+		///////hair pinning/////////////////////
+		udpClient := udp_client.Create()
+		udpClient.LocalPort = client.LocalRtpServerPort
+		err = udpClient.Connect(client.TcpClient.Ip, client.RemoteRtpServerPort)
+		if err != nil {
+			return "", err
+		}
+
+		err = udpClient.SendMessage("HAIR PINNING;IGNORE THIS MESSAGE")
+		if err != nil {
+			return "", err
+		}
+
+		err = udpClient.Disconnect()
+		if err != nil {
+			return "", err
+		}
+		//////////////////////////////////////////
+
+		rtpServer := udp_server.Create()
+		client.RtpServer = rtpServer
+
+		err := rtpServer.Start("", client.LocalRtpServerPort)
+		if err != nil {
+			return "", err
 		}
 	}
 
@@ -401,6 +431,9 @@ func (client *RtspClient) ReadMessage() (message string, err error) {
 		message += responseLine + "\r\n"
 	}
 
+	logger.Junk(fmt.Sprintf("Rtsp client #%d: received message:", client.SessionId))
+	logger.Junk(message)
+
 	return message, err
 }
 
@@ -444,15 +477,15 @@ func (client *RtspClient) UnsubscribeFromRtpBuff(uid int64) {
 }
 
 func (client *RtspClient) broadcastRTP() {
+	var i int
 	for client.IsConnected {
 
-		recvRtpBuff := <-client.RTPChan
+		recvRtpBuff := <-client.RTPVideoChan
 
+		i++
 		for _, subscriber := range client.RtpSubscribers {
-			subscriber(recvRtpBuff)
+			subscriber(&recvRtpBuff, i)
 		}
-
-		recvRtpBuff = recvRtpBuff[:0]
 	}
 }
 
@@ -467,43 +500,37 @@ func (client *RtspClient) run() {
 			interleaved := header[0] == 0x24
 			if interleaved {
 				contentLen := int32(binary.BigEndian.Uint16(header[2:]))
-				rtpContent := make([]byte, contentLen)
-				_, err := io.ReadFull(client.TcpClient.IO, rtpContent)
+				rtpPacket := make([]byte, contentLen+4)
+				rtpPacket[0] = header[0]
+				rtpPacket[1] = header[1]
+				rtpPacket[2] = header[2]
+				rtpPacket[3] = header[3]
+
+				_, err := io.ReadFull(client.TcpClient.IO, rtpPacket[4:contentLen+4])
 				if err != nil {
 					logger.Error(err.Error())
 				}
 
-				rtpPacket := make([]byte, contentLen+4)
-				copy(rtpPacket, header)
-				copy(rtpPacket[4:], rtpContent)
+				/////VERY IMPORTANT NOTICE!!!
+				///VIDEO AND AUDIO TRACK CHANNEL IDENTIFIERS ARE NOT CONSTANT!!!!
+				////IDENTIFIERS COME FROM SDP ON SETUP STEP
+				/////NORMALLY THEY ARE THE FIRST AVAILABLE NUMBERS 0 - video, 1 - audio
+				////BUT UNDER ANY CIRCUMSTANCES THAT MAY CHANGE
+				videoChannelId := byte(0)
+				audioChannelId := byte(1)
+				if rtpPacket[1] == videoChannelId {
+					client.RTPVideoChan <- rtpPacket
+				}
+				if rtpPacket[1] == audioChannelId {
+					client.RTPAudioChan <- rtpPacket
+				}
 
-				client.RTPChan <- rtpPacket
 			} else {
 				logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
 			}
 		}
 		if client.Transport == RtspTransportUdp {
-			client.RTPChan <- <-client.RtpServer.RecvBuff
+			client.RTPVideoChan <- <-client.RtpServer.RecvBuff
 		}
 	}
-}
-
-func extractInterleavedFrame(payload []byte) []byte {
-	header := make([]byte, 4)
-	header[0] = payload[0]
-	header[1] = payload[1]
-	header[2] = payload[2]
-	header[3] = payload[3]
-
-	if payload[0] != 0x24 {
-		return []byte{}
-	}
-
-	//chanIdentifier := payload[1]
-	size := int32(binary.BigEndian.Uint16(header[2:]))
-
-	content := make([]byte, size)
-	copy(content, payload[4:size+4])
-
-	return content
 }
