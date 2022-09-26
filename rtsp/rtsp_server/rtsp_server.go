@@ -139,6 +139,17 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 		return "", errors.New(fmt.Sprintf("rtsp server #%d: Некорректный метод запроса %s", server.SessionId, requestLines[0]))
 	}
 
+	cseqExp := regexp.MustCompile("[cC][sS][eE][qQ]:\\s+(\\d+)")
+	if !cseqExp.MatchString(request) {
+		return "", errors.New(fmt.Sprintf("rtsp server #%d: Отсутствует заголовок Cseq", server.SessionId))
+	} else {
+		cseqString := cseqExp.FindStringSubmatch(request)[1]
+		client.CSeq, err = strconv.Atoi(cseqString)
+		if err != nil {
+			return "", err
+		}
+	}
+
 	now := time.Now()
 	nowFormatted := now.Format("Mon, Jan 02 2006 15:04:05 MST")
 
@@ -177,15 +188,20 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
 			"Public: OPTIONS, DESCRIBE, PLAY, PAUSE, SETUP, TEARDOWN, SET_PARAMETER, GET_PARAMETER\r\n" +
 			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
-			"Content-Length: 0\r\n\r\n"
+			//"Content-Length: 0\r\n\r\n"
+			"\r\n"
 	}
 
 	if method == "setup" {
 		transportExp := regexp.MustCompile("[rR][tT][pP]\\/[aA][vV][pP]\\/(\\w+)")
+		var transport string
 		if !transportExp.MatchString(request) {
-			return "", errors.New(fmt.Sprintf("rtsp server #%d: Could not detect transport protocol", server.SessionId))
+			logger.Warning(fmt.Sprintf("rtsp server #%d: Could not detect transport protocol", server.SessionId))
+			logger.Warning("Trying to use UDP as a transport protocol")
+			transport = rtspClient.RtspTransportUdp
+		} else {
+			transport = strings.ToLower(transportExp.FindStringSubmatch(request)[1])
 		}
-		transport := strings.ToLower(transportExp.FindStringSubmatch(request)[1])
 
 		transportInfo := ""
 		switch transport {
@@ -197,7 +213,10 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 
 			transportPortExp, err := regexp.Compile("(\\d+)-(\\d+)")
 			if err != nil {
-				return "", nil
+				return "", err
+			}
+			if !transportPortExp.MatchString(request) {
+				return "", errors.New("rtsp server #%d: Tried to establish UDP connection, but client did not send port range")
 			}
 			portMatches := transportPortExp.FindStringSubmatch(request)
 			clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
@@ -243,7 +262,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 		client.IsPlaying = false
 	}
 
-	client.CSeq++
+	//client.CSeq++
 
 	return response, err
 }

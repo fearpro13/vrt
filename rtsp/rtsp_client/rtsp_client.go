@@ -61,7 +61,7 @@ func Create() *RtspClient {
 
 	rtspClient := &RtspClient{
 		SessionId:      sessionId,
-		CSeq:           1,
+		CSeq:           0,
 		TcpClient:      tcpClient,
 		RtpServer:      udpServer,
 		RtpClient:      udpClient,
