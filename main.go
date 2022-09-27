@@ -9,6 +9,8 @@ import (
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_proxy"
+	"vrt/rtsp_to_ws"
+	"vrt/ws/ws_server"
 )
 
 // rtsp://stream:Tv4m6ag6@10.1.60.25
@@ -45,13 +47,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	//wsServer1 := ws_server.Create()
-	//err = wsServer1.Start("", 6061)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
+	wsServer1 := ws_server.Create()
+	err = wsServer1.Start("", 6061)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
 
 	////////////////////////////////////////////////////////////
 	//rtspProxyUdp := rtsp_proxy.Create()

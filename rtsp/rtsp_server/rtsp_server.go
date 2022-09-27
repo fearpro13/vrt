@@ -17,6 +17,8 @@ import (
 	"vrt/udp/udp_server"
 )
 
+type OnClientConnectCallback func(*rtspClient.RtspClient)
+
 type RtspServer struct {
 	SessionId     int64
 	Login         string
@@ -32,8 +34,9 @@ type RtspServer struct {
 	RtcpServer    *udp_server.UdpServer
 	RtcpLocalPort int
 	sync.Mutex
-	Clients   map[int64]*rtspClient.RtspClient
-	IsRunning bool
+	Clients         map[int64]*rtspClient.RtspClient
+	OnClientConnect OnClientConnectCallback
+	IsRunning       bool
 }
 
 func Create() *RtspServer {
@@ -102,6 +105,10 @@ func (server *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.TcpCl
 		delete(server.Clients, client.SessionId)
 		logger.Debug(fmt.Sprintf("Cleaned up #%d rtsp client from server clients", client.SessionId))
 		logger.Debug(fmt.Sprintf("Current number of clients:%d", len(server.Clients)))
+	}
+
+	if server.OnClientConnect != nil {
+		server.OnClientConnect(client)
 	}
 
 	go server.handleRtspClient(client)

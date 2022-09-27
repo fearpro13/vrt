@@ -14,6 +14,7 @@ type RtspProxy struct {
 	RtspClient *rtsp_client.RtspClient
 	RtspServer *rtsp_server.RtspServer
 	IsRunning  bool
+	RTPPreBuff chan *[]byte
 }
 
 func Create() RtspProxy {
@@ -101,6 +102,10 @@ func (proxy *RtspProxy) Stop() error {
 func (proxy *RtspProxy) run() {
 	rtspServer := proxy.RtspServer
 	rtspClient := proxy.RtspClient
+
+	rtspServer.OnClientConnect = func(client *rtsp_client.RtspClient) {
+
+	}
 
 	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytesPtr *[]byte, num int) {
 		bytes := *bytesPtr
