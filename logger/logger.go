@@ -29,6 +29,17 @@ const CriticalLogLvl = 6
 const EmergencyLogName = "EMERGENCY"
 const EmergencyLogLvl = 7
 
+var LogLevelToName = map[int]string{
+	JunkLogLvl:      JunkLogName,
+	DebugLogLvl:     DebugLogName,
+	InfoLogLvl:      InfoLogName,
+	NoticeLogLvl:    NoticeLogName,
+	WarningLogLvl:   WarningLogName,
+	ErrorLogLvl:     ErrorLogName,
+	CriticalLogLvl:  CriticalLogName,
+	EmergencyLogLvl: EmergencyLogName,
+}
+
 var globalLogLvl = 0
 
 func SetLogLevel(logLevel int) {

@@ -203,8 +203,8 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 		transportExp := regexp.MustCompile("[rR][tT][pP]\\/[aA][vV][pP]\\/(\\w+)")
 		var transport string
 		if !transportExp.MatchString(request) {
-			logger.Warning(fmt.Sprintf("rtsp server #%d: Could not detect transport protocol", server.SessionId))
-			logger.Warning("Trying to use UDP as a transport protocol")
+			logger.Warning(fmt.Sprintf("RTSP client #%d: Could not detect transport protocol", client.SessionId))
+			logger.Warning(fmt.Sprintf("RTSP client #%d: Trying to use UDP as a transport protocol", client.SessionId))
 			transport = rtspClient.RtspTransportUdp
 		} else {
 			transport = strings.ToLower(transportExp.FindStringSubmatch(request)[1])
@@ -223,7 +223,7 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 				return "", err
 			}
 			if !transportPortExp.MatchString(request) {
-				return "", errors.New("rtsp server #%d: Tried to establish UDP connection, but client did not send port range")
+				return "", errors.New(fmt.Sprintf("RTSP server #%d: Tried to establish UDP connection, but client did not send port range", server.SessionId))
 			}
 			portMatches := transportPortExp.FindStringSubmatch(request)
 			clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
@@ -237,8 +237,10 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 
 			transportInfo = fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
 		default:
-			return "", errors.New(fmt.Sprintf("rtsp server #%d: transport %s is not supported", server.SessionId, transport))
+			return "", errors.New(fmt.Sprintf("RTSP server #%d: transport %s is not supported", server.SessionId, transport))
 		}
+
+		logger.Info(fmt.Sprintf("RTSP client #%d: Selected %s as a transport protocol", client.SessionId, transport))
 
 		response = "RTSP/1.0 200 OK\r\n" +
 			transportInfo +
