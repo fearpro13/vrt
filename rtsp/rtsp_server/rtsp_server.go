@@ -257,6 +257,9 @@ func parseRequest(server *RtspServer, client *rtspClient.RtspClient, request str
 			"Content-Length: 0\r\n\r\n"
 
 		client.IsPlaying = true
+		if client.OnStartPlaying != nil {
+			client.OnStartPlaying(client)
+		}
 	}
 
 	if method == "teardown" {

@@ -54,7 +54,7 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 
 		var packets []*av.Packet
 		if bytes[0] == 0x24 {
-			packets, _ = rtpDemux(rtspClient, &bytes)
+			packets, _ = RtpDemux(rtspClient, &bytes)
 		} else {
 			interleavedFakeFrame := make([]byte, 4)
 			interleavedFakeFrame[0] = 36
@@ -67,7 +67,7 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 			copy(rtpRaw, interleavedFakeFrame)
 			copy(rtpRaw[4:], bytes)
 
-			packets, _ = rtpDemux(rtspClient, &rtpRaw)
+			packets, _ = RtpDemux(rtspClient, &rtpRaw)
 		}
 
 		for _, packet := range packets {
@@ -147,7 +147,7 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 		//	var packets []*av.Packet
 		//	if bytes[0] == 0x24 {
 		//		//logger.Debug(fmt.Sprintf("%d %d %d %d", bytes[0], bytes[1], bytes[2], bytes[3]))
-		//		packets, _ = rtpDemux(rtspClient, &bytes)
+		//		packets, _ = RtpDemux(rtspClient, &bytes)
 		//	} else {
 		//		interleavedFakeFrame := make([]byte, 4)
 		//		interleavedFakeFrame[0] = 36
@@ -160,7 +160,7 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 		//		copy(rtpRaw, interleavedFakeFrame)
 		//		copy(rtpRaw[4:], bytes)
 		//
-		//		packets, _ = rtpDemux(rtspClient, &rtpRaw)
+		//		packets, _ = RtpDemux(rtspClient, &rtpRaw)
 		//	}
 		//
 		//	for _, packet := range packets {
@@ -192,7 +192,32 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 	return broadcast
 }
 
-func rtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Packet, bool) {
+func RtpMux(rtspClient *rtsp_client.RtspClient, packets *[]av.Packet) (payload *[]byte) {
+	rtpHeader := make([]byte, 12)
+	version := 2                           // 0, 0-1, 2 bits
+	padding := 0                           //0, 2, 1 bit
+	extension := 0                         // 0, 3 , 1 bit
+	csrcCount := 0                         //0, 4-7, 4 bit
+	marker := 0                            //1, 0, 1 bit
+	payloadType := 0                       // 1, 1-7, 7 bits
+	sequenceNumber := 0                    //2-3 full, 16 bit
+	timestamp := uint32(time.Now().Unix()) //4-7 full, 32 bit
+	ssrc := 0                              //8-11 full, 32 bit
+
+	var firstByte, secondByte int
+	firstByte = version | (padding << 2) | (extension << 3) | (csrcCount << 4)
+	secondByte = marker | (payloadType << 1)
+
+	rtpHeader[0] = byte(firstByte)
+	rtpHeader[1] = byte(secondByte)
+	binary.BigEndian.PutUint16(rtpHeader[2:3], uint16(sequenceNumber))
+	binary.BigEndian.PutUint32(rtpHeader[4:7], uint32(timestamp))
+	binary.BigEndian.PutUint32(rtpHeader[8:11], uint32(ssrc))
+
+	return nil
+}
+
+func RtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Packet, bool) {
 	content := *payloadRAW
 	firstByte := content[4]
 	padding := (firstByte>>5)&1 == 1

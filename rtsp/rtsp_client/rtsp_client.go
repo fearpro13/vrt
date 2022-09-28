@@ -23,6 +23,7 @@ const RtspTransportTcp = "tcp"
 const RtspTransportUdp = "udp"
 
 type OnDisconnectCallback func(client *RtspClient)
+type OnStartPlayingCallback func(client *RtspClient)
 
 type RtspClient struct {
 	Transport                     string
@@ -49,6 +50,7 @@ type RtspClient struct {
 	RTPVideoChan                  chan []byte
 	RTPAudioChan                  chan []byte
 	OnDisconnect                  OnDisconnectCallback
+	OnStartPlaying                OnStartPlayingCallback
 }
 
 type RtpSubscriber func(*[]byte, int)
@@ -332,6 +334,10 @@ func (client *RtspClient) Play() (response string, err error) {
 	}
 
 	client.IsPlaying = true
+
+	if client.OnStartPlaying != nil {
+		client.OnStartPlaying(client)
+	}
 
 	go client.run()
 	go client.broadcastRTP()

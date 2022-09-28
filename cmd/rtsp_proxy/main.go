@@ -4,8 +4,10 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
@@ -49,5 +51,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	select {}
+	signals := make(chan os.Signal, 1)
+
+	signal.Notify(signals, syscall.SIGINT)
+	signal.Notify(signals, syscall.SIGKILL)
+
+	<-signals
+
+	rtspProxyTcp.Stop()
+
+	os.Exit(0)
 }
