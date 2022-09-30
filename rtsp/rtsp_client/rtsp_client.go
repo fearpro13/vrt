@@ -95,11 +95,11 @@ func (client *RtspClient) Connect(address string, transport string) error {
 	hasCreds, _ := regexp.MatchString("\\w+:\\w+", address)
 
 	if !hasRtsp {
-		return errors.New("отсутствует префикс rtsp://")
+		return errors.New(fmt.Sprintf("RTSP client #%d: Отсутствует префикс rtsp://", client.SessionId))
 	}
 
 	if !hasCreds {
-		return errors.New("отсутсвуют данные для авторизации BasicAuth")
+		return errors.New(fmt.Sprintf("RTSP client #%d: отсутсвуют данные для авторизации BasicAuth", client.SessionId))
 	}
 
 	ipExp, _ := regexp.Compile("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b")

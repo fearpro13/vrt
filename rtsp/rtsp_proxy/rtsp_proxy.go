@@ -180,9 +180,9 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
 	copy(cpyBuff, payload)
 
 	if client.Transport == rtsp_client.RtspTransportTcp {
-		if !client.TcpClient.IsConnected {
-			return
-		}
+		//if !client.TcpClient.IsConnected {
+		//	return
+		//}
 
 		if cpyBuff[0] == 0x24 {
 			_, err := client.TcpClient.Send(cpyBuff)

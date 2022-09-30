@@ -9,6 +9,8 @@ import (
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_proxy"
+	"vrt/rtsp_to_ws"
+	"vrt/ws/ws_server"
 )
 
 // rtsp://stream:Tv4m6ag6@10.1.60.25
@@ -34,9 +36,6 @@ func main() {
 
 	address := os.Args[1]
 
-	//rtspServer := rtsp_server.Create()
-	//rtspServer.Start("", 0, 0)
-
 	//////////////////////////////////////////////////////
 	rtspProxyTcp := rtsp_proxy.Create()
 	err := rtspProxyTcp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportTcp)
@@ -45,63 +44,63 @@ func main() {
 		os.Exit(1)
 	}
 
-	//wsServer1 := ws_server.Create()
-	//err = wsServer1.Start("", 6061)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
+	wsServer1 := ws_server.Create()
+	err = wsServer1.Start("", 6061)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
+
+	//////////////////////////////////////////////////////////
+	rtspProxyUdp := rtsp_proxy.Create()
+	err = rtspProxyUdp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportUdp)
+	if err != nil {
+		logger.Error(err.Error())
+		os.Exit(1)
+	}
+
+	wsServer2 := ws_server.Create()
+	err = wsServer2.Start("", 6062)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
 
 	////////////////////////////////////////////////////////////
-	//rtspProxyUdp := rtsp_proxy.Create()
-	//err := rtspProxyUdp.ProxyFromAddress(address, 0, rtsp_client.RtspTransportUdp)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//	os.Exit(1)
-	//}
+	rtspClientTcp := rtsp_client.Create()
+	rtspClientTcp.Connect(rtspProxyTcp.RtspServer.RtspAddress, rtsp_client.RtspTransportTcp)
+	rtspClientTcp.Describe()
+	rtspClientTcp.Options()
+	rtspClientTcp.Setup()
+	rtspClientTcp.Play()
 
-	//wsServer2 := ws_server.Create()
-	//err = wsServer2.Start("", 6062)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
+	wsServer3 := ws_server.Create()
+	err = wsServer3.Start("", 6063)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 
-	//////////////////////////////////////////////////////////////
-	//rtspClientTcp := rtsp_client.Create()
-	//rtspClientTcp.Connect(rtspProxyTcp.RtspServer.RtspAddress, rtsp_client.RtspTransportTcp)
-	//rtspClientTcp.Describe()
-	//rtspClientTcp.Options()
-	//rtspClientTcp.Setup()
-	//rtspClientTcp.Play()
-	//
-	//wsServer3 := ws_server.Create()
-	//err = wsServer3.Start("", 6063)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientTcp, wsServer3)
-
-	//////////////////////////////////////////////////////////////
-	//rtspClientUdp := rtsp_client.Create()
-	//rtspClientUdp.Connect(rtspProxyUdp.RtspServer.RtspAddress, rtsp_client.RtspTransportUdp)
-	//rtspClientUdp.Describe()
-	//rtspClientUdp.Options()
-	//rtspClientUdp.Setup()
-	//rtspClientUdp.Play()
-	//
-	//wsServer4 := ws_server.Create()
-	//err = wsServer4.Start("", 6064)
-	//if err != nil {
-	//	logger.Error(err.Error())
-	//}
-	//
-	//rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientUdp, wsServer4)
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientTcp, wsServer3)
 
 	////////////////////////////////////////////////////////////
+	rtspClientUdp := rtsp_client.Create()
+	rtspClientUdp.Connect(rtspProxyUdp.RtspServer.RtspAddress, rtsp_client.RtspTransportUdp)
+	rtspClientUdp.Describe()
+	rtspClientUdp.Options()
+	rtspClientUdp.Setup()
+	rtspClientUdp.Play()
+
+	wsServer4 := ws_server.Create()
+	err = wsServer4.Start("", 6064)
+	if err != nil {
+		logger.Error(err.Error())
+	}
+
+	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientUdp, wsServer4)
+
+	//////////////////////////////////////////////////////////
 
 	//TODO Убрать это решение из продакшен кода, использовать только для локальной разработки
 	select {}

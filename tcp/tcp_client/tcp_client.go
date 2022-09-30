@@ -8,6 +8,7 @@ import (
 	"net"
 	"strconv"
 	"strings"
+	"time"
 	"vrt/logger"
 )
 
@@ -21,12 +22,16 @@ type TcpClient struct {
 	IO           *bufio.ReadWriter
 	IsConnected  bool
 	OnDisconnect onDisconnectCallback
+	writeTimeout time.Duration
+	readTimeout  time.Duration
 }
 
 func Create() *TcpClient {
 	id := rand.Int63()
 	client := &TcpClient{
-		SessionId: id,
+		SessionId:    id,
+		writeTimeout: 5 * time.Second,
+		readTimeout:  5 * time.Second,
 	}
 
 	return client
@@ -36,6 +41,7 @@ func CreateFromConnection(connection *net.TCPConn) (client *TcpClient, err error
 	client = Create()
 
 	tcpAddress := (*connection).RemoteAddr().String()
+
 	tcpAddressArray := strings.Split(tcpAddress, ":")
 	assignedIpString := tcpAddressArray[0]
 	assignedPortString := tcpAddressArray[1]
@@ -62,7 +68,7 @@ func (client *TcpClient) Connect(ip string, port int) error {
 	connection, err := net.DialTCP("tcp4", nil, &tcpAddress)
 
 	if err != nil {
-		return nil
+		return err
 	}
 
 	remoteAddress := connection.RemoteAddr().String()
@@ -87,6 +93,7 @@ func (client *TcpClient) Connect(ip string, port int) error {
 }
 
 func (client *TcpClient) Send(bytes []byte) (bytesWritten int, err error) {
+	err = client.Socket.SetWriteDeadline(time.Now().Add(client.writeTimeout * time.Second))
 	bytesWritten, err = client.IO.Write(bytes)
 	if err != nil {
 		if err == io.EOF {
@@ -95,6 +102,9 @@ func (client *TcpClient) Send(bytes []byte) (bytesWritten int, err error) {
 		return 0, err
 	}
 
+	if err != nil {
+		return 0, err
+	}
 	err = client.IO.Flush()
 	if err != nil {
 		return 0, err
@@ -114,6 +124,10 @@ func (client *TcpClient) SendString(message string) (bytesWritten int, err error
 		return 0, err
 	}
 
+	err = client.Socket.SetWriteDeadline(time.Now().Add(client.writeTimeout * time.Second))
+	if err != nil {
+		return 0, err
+	}
 	err = client.IO.Flush()
 	if err != nil {
 		return 0, err
@@ -132,12 +146,17 @@ func (client *TcpClient) ReadBytes(bytesToRead int) (bytes []byte, bytesRead int
 
 	bytes = make([]byte, bytesToRead)
 
+	err = client.Socket.SetReadDeadline(time.Now().Add(client.readTimeout * time.Second))
+	if err != nil {
+		return []byte{}, 0, err
+	}
+
 	bytesRead, err = client.IO.Read(bytes)
 	if err != nil {
 		if err == io.EOF {
 			err = client.Disconnect()
 		}
-		return []byte{}, 0, nil
+		return []byte{}, 0, err
 	}
 
 	if bytesRead == 0 {
@@ -152,6 +171,11 @@ func (client *TcpClient) ReadBytes(bytesToRead int) (bytes []byte, bytesRead int
 }
 
 func (client *TcpClient) ReadLine() (message string, err error) {
+	err = client.Socket.SetReadDeadline(time.Now().Add(client.readTimeout * time.Second))
+	if err != nil {
+		return "", err
+	}
+
 	messageBytes, _, err := client.IO.ReadLine()
 
 	if err != nil {
