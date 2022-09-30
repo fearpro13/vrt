@@ -50,7 +50,8 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
+	wsBroadcast1 := rtsp_to_ws.NewBroadcast()
+	wsBroadcast1.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
 
 	//////////////////////////////////////////////////////////
 	rtspProxyUdp := rtsp_proxy.Create()
@@ -66,7 +67,8 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
+	wsBroadcast2 := rtsp_to_ws.NewBroadcast()
+	wsBroadcast2.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
 
 	////////////////////////////////////////////////////////////
 	rtspClientTcp := rtsp_client.Create()
@@ -82,7 +84,8 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientTcp, wsServer3)
+	wsBroadcast3 := rtsp_to_ws.NewBroadcast()
+	wsBroadcast3.BroadcastRtspClientToWebsockets(rtspClientTcp, wsServer3)
 
 	////////////////////////////////////////////////////////////
 	rtspClientUdp := rtsp_client.Create()
@@ -98,7 +101,8 @@ func main() {
 		logger.Error(err.Error())
 	}
 
-	rtsp_to_ws.BroadcastRtspClientToWebsockets(rtspClientUdp, wsServer4)
+	wsBroadcast4 := rtsp_to_ws.NewBroadcast()
+	wsBroadcast4.BroadcastRtspClientToWebsockets(rtspClientUdp, wsServer4)
 
 	//////////////////////////////////////////////////////////
 

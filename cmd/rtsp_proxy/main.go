@@ -20,7 +20,7 @@ func main() {
 
 	command := cli.NewCommand()
 	command.RegisterArgument("remote rtsp address ex. rtsp://user:password@10.10.20.40:554")
-	command.RegisterOption("port", "p", "local RTSP port", true, "6060")
+	command.RegisterOption("port", "p", "local RTSP port", false, "6060")
 	command.RegisterOption("transport", "t", "RTSP transport that is used for remote connection, only TCP and UDP are supported", true, "tcp")
 	command.RegisterOption("verbose", "v", "number,verbosity or log level, \n		JUNK-0,DEBUG-1,INFO-2,NOTICE-3,WARN-4,ERR-5,CRITICAL-6,EMERGENCY-7,SILENT-10", true, "2")
 

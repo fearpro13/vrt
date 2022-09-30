@@ -25,26 +25,19 @@ type Broadcast struct {
 	AVPacketPreBuffer []*av.Packet
 }
 
-func (broadcast *Broadcast) Stop() {
-	for _, wsClient := range broadcast.wsServer.Clients {
-		broadcast.rtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
-		wsClient.SetCallback(nil)
-	}
-	broadcast.wsServer.Callback = nil
-	broadcast.IsRunning = false
-
-	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server stopped", broadcast.rtspClient.SessionId, broadcast.wsServer.SessionId))
-}
-
-func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServer *ws_server.WSServer) *Broadcast {
+func NewBroadcast() *Broadcast {
 	broadcast := &Broadcast{
-		IsRunning:         true,
-		rtspClient:        rtspClient,
-		wsServer:          wsServer,
 		clients:           map[int64]*ws_client.WSClient{},
 		AVPacketChan:      make(chan *av.Packet, 1024),
 		AVPacketPreBuffer: []*av.Packet{},
 	}
+	return broadcast
+}
+
+func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServer *ws_server.WSServer) {
+	broadcast.IsRunning = true
+	broadcast.rtspClient = rtspClient
+	broadcast.wsServer = wsServer
 
 	rtspClient.SubscribeToRtpBuff(wsServer.SessionId, func(bytesPtr *[]byte, num int) {
 		bytes := *bytesPtr
@@ -131,65 +124,20 @@ func BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServe
 				client.Send(websocket.BinaryMessage, hRaw)
 			}
 		}
-
-		//start := false
-		//
-		////var timeLine = make(map[int8]time.Duration)
-		//
-		//rtspClient.SubscribeToRtpBuff(client.SessionId, func(bytesPtr *[]byte, num int) {
-		//	bytes := *bytesPtr
-		//	if len(bytes) == 0 {
-		//		return
-		//	}
-		//
-		//	//logger.Debug(fmt.Sprintf("Received RTP packet #%d", num))
-		//
-		//	var packets []*av.Packet
-		//	if bytes[0] == 0x24 {
-		//		//logger.Debug(fmt.Sprintf("%d %d %d %d", bytes[0], bytes[1], bytes[2], bytes[3]))
-		//		packets, _ = RtpDemux(rtspClient, &bytes)
-		//	} else {
-		//		interleavedFakeFrame := make([]byte, 4)
-		//		interleavedFakeFrame[0] = 36
-		//		interleavedFakeFrame[1] = bytes[1] //96 = videoID RTP format from SDP
-		//		payloadSizeBytes := int16ToBytes(len(bytes))
-		//		interleavedFakeFrame[2] = payloadSizeBytes[0]
-		//		interleavedFakeFrame[3] = payloadSizeBytes[1]
-		//
-		//		rtpRaw := make([]byte, len(bytes)+4)
-		//		copy(rtpRaw, interleavedFakeFrame)
-		//		copy(rtpRaw[4:], bytes)
-		//
-		//		packets, _ = RtpDemux(rtspClient, &rtpRaw)
-		//	}
-		//
-		//	for _, packet := range packets {
-		//		if packet.IsKeyFrame {
-		//			start = true
-		//		}
-		//		if !start {
-		//			continue
-		//		}
-		//
-		//		//timeLine[packet.Idx] += packet.Duration
-		//		//packet.Time = timeLine[packet.Idx]
-		//
-		//		_, hRaw, err := muxer.WritePacket(*packet, false)
-		//		if err != nil {
-		//			logger.Error(err.Error())
-		//		}
-		//
-		//		if len(hRaw) > 0 {
-		//			client.Send(websocket.BinaryMessage, hRaw)
-		//		}
-		//
-		//	}
-		//})
 	}
 
 	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server started", rtspClient.SessionId, wsServer.SessionId))
+}
 
-	return broadcast
+func (broadcast *Broadcast) Stop() {
+	for _, wsClient := range broadcast.wsServer.Clients {
+		broadcast.rtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
+		wsClient.SetCallback(nil)
+	}
+	broadcast.wsServer.Callback = nil
+	broadcast.IsRunning = false
+
+	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server stopped", broadcast.rtspClient.SessionId, broadcast.wsServer.SessionId))
 }
 
 func RtpMux(rtspClient *rtsp_client.RtspClient, packets *[]av.Packet) (payload *[]byte) {

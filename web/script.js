@@ -115,9 +115,12 @@ class websocketStream {
 }
 
 window.addEventListener('load', () => {
-    new websocketStream("ws://0.0.0.0:6061",'video_tcp')
-    new websocketStream("ws://0.0.0.0:6062",'video_udp')
-    new websocketStream("ws://0.0.0.0:6063",'video_proxy_tcp')
-    new websocketStream("ws://0.0.0.0:6064",'video_proxy_udp')
+    new websocketStream("ws://moidom-api.local/ws_stream/",'video_tcp')
+
+
+    // new websocketStream("ws://0.0.0.0:6061",'video_tcp')
+    // new websocketStream("ws://0.0.0.0:6062",'video_udp')
+    // new websocketStream("ws://0.0.0.0:6063",'video_proxy_tcp')
+    // new websocketStream("ws://0.0.0.0:6064",'video_proxy_udp')
 })
 

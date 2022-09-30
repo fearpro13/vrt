@@ -44,7 +44,7 @@ func CreateFromConnection(conn *websocket.Conn) *WSClient {
 	client.Ip = assignedIpString
 	client.Port = assignedPortInt
 
-	logger.Debug(fmt.Sprintf("WS client #%d: Connected from %s:%d", client.SessionId, assignedIpString, assignedPortInt))
+	logger.Info(fmt.Sprintf("WS client #%d: Connected from %s:%d", client.SessionId, assignedIpString, assignedPortInt))
 
 	go run(client)
 
@@ -69,7 +69,7 @@ func (client *WSClient) Disconnect() error {
 		client.onDisconnect(client)
 	}
 
-	logger.Debug(fmt.Sprintf("WS client #%d: Disconnected ", client.SessionId))
+	logger.Info(fmt.Sprintf("WS client #%d: Disconnected ", client.SessionId))
 
 	return err
 }

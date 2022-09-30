@@ -18,6 +18,7 @@ type RtspProxy struct {
 	IsRunning          bool
 	PreBufferedClients map[int64]bool
 	RTPPreBuff         []*[]byte
+	clientSelfHosted   bool // if rtsp client was created within rtsp_proxy, not outside
 }
 
 type RtpFragmentationInfo struct {
@@ -25,10 +26,10 @@ type RtpFragmentationInfo struct {
 	fragmentationBuffer  bytes.Buffer
 }
 
-func Create() RtspProxy {
+func Create() *RtspProxy {
 	server := rtsp_server.Create()
 
-	proxy := RtspProxy{
+	proxy := &RtspProxy{
 		SessionId:          rand.Int63(),
 		RtspServer:         server,
 		RTPPreBuff:         []*[]byte{},
@@ -83,6 +84,7 @@ func (proxy *RtspProxy) ProxyFromRtspClient(client *rtsp_client.RtspClient, loca
 
 func (proxy *RtspProxy) ProxyFromAddress(remoteRtspAddress string, localRtspPort int, remoteTransport string) error {
 	client := rtsp_client.Create()
+	proxy.clientSelfHosted = true
 	proxy.RtspClient = client
 	err := client.Connect(remoteRtspAddress, remoteTransport)
 	if err != nil {
@@ -93,21 +95,32 @@ func (proxy *RtspProxy) ProxyFromAddress(remoteRtspAddress string, localRtspPort
 }
 
 func (proxy *RtspProxy) Stop() error {
-	client := proxy.RtspClient
-
-	client.UnsubscribeFromRtpBuff(proxy.SessionId)
+	if !proxy.IsRunning {
+		return nil
+	}
 
 	proxy.IsRunning = false
 
-	_, err := client.TearDown()
-	if err != nil {
-		return err
+	client := proxy.RtspClient
+	server := proxy.RtspServer
+
+	client.UnsubscribeFromRtpBuff(proxy.SessionId)
+
+	if proxy.clientSelfHosted {
+		if client.IsConnected {
+			_, err := client.TearDown()
+			if err != nil {
+				return err
+			}
+
+			err = client.Disconnect()
+			if err != nil {
+				return err
+			}
+		}
 	}
 
-	err = client.Disconnect()
-	if err != nil {
-		return err
-	}
+	err := server.Stop()
 
 	return err
 }
@@ -141,6 +154,10 @@ func (proxy *RtspProxy) run() {
 	//	fragmentationStarted: false,
 	//	fragmentationBuffer:  bytes.Buffer{},
 	//}
+
+	rtspClient.OnDisconnect = func(client *rtsp_client.RtspClient) {
+		proxy.Stop()
+	}
 
 	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytesPtr *[]byte, num int) {
 		rtpBytes := *bytesPtr

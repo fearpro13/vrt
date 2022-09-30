@@ -83,13 +83,31 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 }
 
 func (server *RtspServer) Stop() error {
+	if !server.IsRunning {
+		return nil
+	}
+
 	server.IsRunning = false
+
+	for _, client := range server.Clients {
+		if client.IsConnected {
+			_, err := client.TearDown()
+			if err != nil {
+				return err
+			}
+		}
+	}
 
 	err := server.Server.Stop()
 	if err != nil {
-		return nil
+		return err
 	}
-	err = server.RtpClient.Disconnect()
+
+	if server.RtpClient.IsConnected {
+		err = server.RtpClient.Disconnect()
+	}
+
+	logger.Info(fmt.Sprintf("RTSP server #%d stopped", server.SessionId))
 
 	return err
 }

@@ -22,16 +22,16 @@ type TcpClient struct {
 	IO           *bufio.ReadWriter
 	IsConnected  bool
 	OnDisconnect onDisconnectCallback
-	writeTimeout time.Duration
-	readTimeout  time.Duration
+	WriteTimeout time.Duration
+	ReadTimeout  time.Duration
 }
 
 func Create() *TcpClient {
 	id := rand.Int63()
 	client := &TcpClient{
 		SessionId:    id,
-		writeTimeout: 5 * time.Second,
-		readTimeout:  5 * time.Second,
+		WriteTimeout: 1 * time.Second,
+		ReadTimeout:  1 * time.Second,
 	}
 
 	return client
@@ -93,7 +93,7 @@ func (client *TcpClient) Connect(ip string, port int) error {
 }
 
 func (client *TcpClient) Send(bytes []byte) (bytesWritten int, err error) {
-	err = client.Socket.SetWriteDeadline(time.Now().Add(client.writeTimeout * time.Second))
+	err = client.Socket.SetWriteDeadline(time.Now().Add(client.WriteTimeout * time.Second))
 	bytesWritten, err = client.IO.Write(bytes)
 	if err != nil {
 		if err == io.EOF {
@@ -124,7 +124,7 @@ func (client *TcpClient) SendString(message string) (bytesWritten int, err error
 		return 0, err
 	}
 
-	err = client.Socket.SetWriteDeadline(time.Now().Add(client.writeTimeout * time.Second))
+	err = client.Socket.SetWriteDeadline(time.Now().Add(client.WriteTimeout * time.Second))
 	if err != nil {
 		return 0, err
 	}
@@ -146,7 +146,7 @@ func (client *TcpClient) ReadBytes(bytesToRead int) (bytes []byte, bytesRead int
 
 	bytes = make([]byte, bytesToRead)
 
-	err = client.Socket.SetReadDeadline(time.Now().Add(client.readTimeout * time.Second))
+	err = client.Socket.SetReadDeadline(time.Now().Add(client.ReadTimeout * time.Second))
 	if err != nil {
 		return []byte{}, 0, err
 	}
@@ -171,7 +171,7 @@ func (client *TcpClient) ReadBytes(bytesToRead int) (bytes []byte, bytesRead int
 }
 
 func (client *TcpClient) ReadLine() (message string, err error) {
-	err = client.Socket.SetReadDeadline(time.Now().Add(client.readTimeout * time.Second))
+	err = client.Socket.SetReadDeadline(time.Now().Add(client.ReadTimeout * time.Second))
 	if err != nil {
 		return "", err
 	}

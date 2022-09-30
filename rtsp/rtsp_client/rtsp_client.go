@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"vrt/logger"
 	"vrt/tcp/tcp_client"
 	"vrt/udp/udp_client"
@@ -139,7 +140,44 @@ func (client *RtspClient) Connect(address string, transport string) error {
 	return err
 }
 
+func (client *RtspClient) ConnectAndPlay(address string, transport string) error {
+	err := client.Connect(address, transport)
+	if err != nil {
+		return err
+	}
+
+	if !client.IsPlaying {
+		_, err = client.Describe()
+		if err != nil {
+			return err
+		}
+
+		_, err = client.Options()
+		if err != nil {
+			return err
+		}
+
+		_, err = client.Setup()
+		if err != nil {
+			return err
+		}
+
+		_, err = client.Play()
+		if err != nil {
+			return err
+		}
+	}
+
+	return err
+}
+
 func (client *RtspClient) Disconnect() error {
+	if !client.IsConnected {
+		return nil
+	}
+
+	client.IsConnected = false
+
 	if client.Transport == RtspTransportUdp {
 		/*
 			Если rtsp клиент используется для подключения к удалённому серверу - RTP client не создаётся, создаётся только RTP сервер
@@ -166,8 +204,6 @@ func (client *RtspClient) Disconnect() error {
 			return err
 		}
 	}
-
-	client.IsConnected = false
 
 	if client.OnDisconnect != nil {
 		client.OnDisconnect(client)
@@ -382,15 +418,15 @@ func (client *RtspClient) TearDown() (response string, err error) {
 		return "", err
 	}
 
-	response, err = client.ReadMessage()
-	if err != nil {
-		return "", err
-	}
+	//response, err = client.ReadMessage()
+	//if err != nil {
+	//	return "", err
+	//}
 
-	err = client.Disconnect()
-	if err != nil {
-		return "", err
-	}
+	//err = client.Disconnect()
+	//if err != nil {
+	//	return "", err
+	//}
 
 	return response, err
 }
@@ -496,47 +532,69 @@ func (client *RtspClient) broadcastRTP() {
 }
 
 func (client *RtspClient) run() {
+	errorCount := 0
+	maxErrorCount := 5
 	for client.IsConnected && client.IsPlaying {
 		if client.Transport == RtspTransportTcp {
 			header := make([]byte, 4)
-			_, err := io.ReadFull(client.TcpClient.IO, header)
+			err := client.TcpClient.Socket.SetReadDeadline(time.Now().Add(client.TcpClient.ReadTimeout))
 			if err != nil {
 				logger.Error(err.Error())
+				errorCount++
 			}
-			interleaved := header[0] == 0x24
-			if interleaved {
-				contentLen := int32(binary.BigEndian.Uint16(header[2:]))
-				rtpPacket := make([]byte, contentLen+4)
-				rtpPacket[0] = header[0]
-				rtpPacket[1] = header[1]
-				rtpPacket[2] = header[2]
-				rtpPacket[3] = header[3]
 
-				_, err := io.ReadFull(client.TcpClient.IO, rtpPacket[4:contentLen+4])
-				if err != nil {
-					logger.Error(err.Error())
-				}
-
-				/////VERY IMPORTANT NOTICE!!!
-				///VIDEO AND AUDIO TRACK CHANNEL IDENTIFIERS ARE NOT CONSTANT!!!!
-				////IDENTIFIERS COME FROM SDP ON SETUP STEP
-				/////NORMALLY THEY ARE THE FIRST AVAILABLE NUMBERS 0 - video, 1 - audio
-				////BUT UNDER ANY CIRCUMSTANCES THAT MAY CHANGE
-				videoChannelId := byte(0)
-				audioChannelId := byte(1)
-				if rtpPacket[1] == videoChannelId {
-					client.RTPVideoChan <- rtpPacket
-				}
-				if rtpPacket[1] == audioChannelId {
-					client.RTPAudioChan <- rtpPacket
-				}
-
+			_, err = io.ReadFull(client.TcpClient.IO, header)
+			if err != nil {
+				logger.Error(err.Error())
+				errorCount++
 			} else {
-				logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
+				interleaved := header[0] == 0x24
+				if interleaved {
+					contentLen := int32(binary.BigEndian.Uint16(header[2:]))
+					rtpPacket := make([]byte, contentLen+4)
+					rtpPacket[0] = header[0]
+					rtpPacket[1] = header[1]
+					rtpPacket[2] = header[2]
+					rtpPacket[3] = header[3]
+
+					err := client.TcpClient.Socket.SetReadDeadline(time.Now().Add(client.TcpClient.ReadTimeout))
+					if err != nil {
+						logger.Error(err.Error())
+						errorCount++
+					}
+
+					_, err = io.ReadFull(client.TcpClient.IO, rtpPacket[4:contentLen+4])
+					if err != nil {
+						logger.Error(err.Error())
+						errorCount++
+					}
+
+					/////VERY IMPORTANT NOTICE!!!
+					///VIDEO AND AUDIO TRACK CHANNEL IDENTIFIERS ARE NOT CONSTANT!!!!
+					////IDENTIFIERS COME FROM SDP ON SETUP STEP
+					/////NORMALLY THEY ARE THE FIRST AVAILABLE NUMBERS 0 - video, 1 - audio
+					////BUT UNDER ANY CIRCUMSTANCES THAT MAY CHANGE
+					videoChannelId := byte(0)
+					audioChannelId := byte(1)
+					if rtpPacket[1] == videoChannelId {
+						client.RTPVideoChan <- rtpPacket
+					}
+					if rtpPacket[1] == audioChannelId {
+						client.RTPAudioChan <- rtpPacket
+					}
+
+				} else {
+					logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
+				}
+			}
+			if client.Transport == RtspTransportUdp {
+				client.RTPVideoChan <- <-client.RtpServer.RecvBuff
 			}
 		}
-		if client.Transport == RtspTransportUdp {
-			client.RTPVideoChan <- <-client.RtpServer.RecvBuff
+
+		if errorCount > maxErrorCount {
+			logger.Warning(fmt.Sprintf("RTSP client #%d: got %d errors while reading remote RTSP stream, client is disconnected", client.SessionId, errorCount))
+			client.Disconnect()
 		}
 	}
 }

@@ -36,7 +36,7 @@ func (server *WSServer) Start(ip string, port int) error {
 
 	server.IsRunning = true
 
-	logger.Debug(fmt.Sprintf("WS server #%d started on %s", server.SessionId, httpServer.Addr))
+	logger.Info(fmt.Sprintf("WS server #%d started on %s", server.SessionId, httpServer.Addr))
 
 	go server.sync()
 
@@ -47,7 +47,7 @@ func (server *WSServer) Stop() error {
 	server.IsRunning = false
 
 	err := server.handler.Close()
-	logger.Debug(fmt.Sprintf("WS #%d stopped", server.SessionId))
+	logger.Info(fmt.Sprintf("WS #%d stopped", server.SessionId))
 
 	return err
 }
