@@ -31,7 +31,7 @@ type RtspClient struct {
 	TcpClient                     *tcp_client.TcpClient
 	RtpServer                     *udp_server.UdpServer
 	RtpClient                     *udp_client.UdpClient
-	SessionId                     int64
+	SessionId                     int32
 	CSeq                          int
 	RemoteAddress                 string
 	RemoteStreamAddress           string
@@ -47,7 +47,7 @@ type RtspClient struct {
 	Codecs                        []av.CodecData
 	VideoCodec                    av.CodecType
 	VideoIDX                      int8
-	RtpSubscribers                map[int64]RtpSubscriber
+	RtpSubscribers                map[int32]RtpSubscriber
 	RTPVideoChan                  chan []byte
 	RTPAudioChan                  chan []byte
 	OnDisconnect                  OnDisconnectCallback
@@ -57,7 +57,7 @@ type RtspClient struct {
 type RtpSubscriber func(*[]byte, int)
 
 func Create() *RtspClient {
-	sessionId := rand.Int63()
+	sessionId := rand.Int31()
 	tcpClient := tcp_client.Create()
 	udpServer := udp_server.Create()
 	udpClient := udp_client.Create()
@@ -68,7 +68,7 @@ func Create() *RtspClient {
 		TcpClient:      tcpClient,
 		RtpServer:      udpServer,
 		RtpClient:      udpClient,
-		RtpSubscribers: map[int64]RtpSubscriber{},
+		RtpSubscribers: map[int32]RtpSubscriber{},
 		RTPVideoChan:   make(chan []byte, 1024),
 		RTPAudioChan:   make(chan []byte, 1024),
 	}
@@ -295,7 +295,7 @@ func (client *RtspClient) Setup() (response string, err error) {
 			if err != nil {
 				return "", err
 			}
-			client.SessionId = int64(sessionIdInt)
+			client.SessionId = int32(sessionIdInt)
 		}
 	}
 
@@ -510,11 +510,11 @@ func parseSdp(client *RtspClient, message *string) {
 
 }
 
-func (client *RtspClient) SubscribeToRtpBuff(uid int64, subscriber RtpSubscriber) {
+func (client *RtspClient) SubscribeToRtpBuff(uid int32, subscriber RtpSubscriber) {
 	client.RtpSubscribers[uid] = subscriber
 }
 
-func (client *RtspClient) UnsubscribeFromRtpBuff(uid int64) {
+func (client *RtspClient) UnsubscribeFromRtpBuff(uid int32) {
 	delete(client.RtpSubscribers, uid)
 }
 

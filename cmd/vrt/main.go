@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"vrt/http/http_control"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_proxy"
@@ -32,6 +33,7 @@ func main() {
 	command.RegisterOption("w:port", "w:p", "websocket port", true, "0")
 
 	command.RegisterFlag("http", "h", "Enables http control mode", true, false)
+	command.RegisterOption("h:port", "h:p", "Http control server port", true, "0")
 
 	if len(os.Args) == 2 && os.Args[1] == "--help" {
 		fmt.Println(command.PrintHelp())
@@ -99,7 +101,7 @@ func main() {
 		}
 
 		wsServer := ws_server.Create()
-		err = wsServer.Start("", wsServerPortInt)
+		err = wsServer.Start("/", "", wsServerPortInt)
 		if err != nil {
 			logger.Error(err.Error())
 			os.Exit(1)
@@ -107,7 +109,7 @@ func main() {
 
 		wsBroadcast = rtsp_to_ws.NewBroadcast()
 		if proxyMode {
-			wsBroadcast.BroadcastRtspClientToWebsockets(rtspProxy.RtspClient, wsServer)
+			wsBroadcast.BroadcastRtspClientToWebsockets("/", rtspProxy.RtspClient, wsServer)
 		} else {
 			rtspClient := rtsp_client.Create()
 			err := rtspClient.ConnectAndPlay(command.GetArgument(0).Value, command.GetOption("t").Value)
@@ -115,11 +117,25 @@ func main() {
 				logger.Error(err.Error())
 				os.Exit(1)
 			}
-			wsBroadcast.BroadcastRtspClientToWebsockets(rtspClient, wsServer)
+			wsBroadcast.BroadcastRtspClientToWebsockets("/", rtspClient, wsServer)
 		}
 	}
 
-	if !websocketMode && !proxyMode {
+	httpControlMode := command.GetFlag("h").Value
+	if httpControlMode {
+		logger.Info("Program uses http control mode")
+
+		controlServerPortString := command.GetOption("h:p").Value
+		controlServerPort, err := strconv.Atoi(controlServerPortString)
+		if err != nil {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
+		controlServer := http_control.NewHttpControlServer()
+		controlServer.Start("", controlServerPort)
+	}
+
+	if !websocketMode && !proxyMode && !httpControlMode {
 		logger.Info("Program stopped because there is no modes enabled")
 		os.Exit(0)
 	}

@@ -9,10 +9,10 @@ import (
 	"vrt/logger"
 )
 
-type WSClientCallback func(client *WSClient)
+type WSClientCallback func(client *WSClient, relativeURLPath string)
 
 type WSClient struct {
-	SessionId    int64
+	SessionId    int32
 	Ip           string
 	Port         int
 	Socket       *websocket.Conn
@@ -23,7 +23,7 @@ type WSClient struct {
 
 func Create() *WSClient {
 	buff := make(chan []byte, 2048)
-	client := &WSClient{SessionId: rand.Int63(), RecvBuff: buff}
+	client := &WSClient{SessionId: rand.Int31(), RecvBuff: buff}
 
 	return client
 }
@@ -66,7 +66,7 @@ func (client *WSClient) Disconnect() error {
 	err := client.Socket.Close()
 
 	if client.onDisconnect != nil {
-		client.onDisconnect(client)
+		client.onDisconnect(client, "")
 	}
 
 	logger.Info(fmt.Sprintf("WS client #%d: Disconnected ", client.SessionId))

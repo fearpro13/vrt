@@ -34,7 +34,7 @@ type RtspServer struct {
 	RtcpServer    *udp_server.UdpServer
 	RtcpLocalPort int
 	sync.Mutex
-	Clients         map[int64]*rtspClient.RtspClient
+	Clients         map[int32]*rtspClient.RtspClient
 	OnClientConnect OnClientConnectCallback
 	IsRunning       bool
 }
@@ -42,7 +42,7 @@ type RtspServer struct {
 func Create() *RtspServer {
 	id := rand.Int63()
 	server := &RtspServer{SessionId: id, Login: "user", Password: "qwerty"}
-	server.Clients = map[int64]*rtspClient.RtspClient{}
+	server.Clients = map[int32]*rtspClient.RtspClient{}
 
 	return server
 }
@@ -56,6 +56,8 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 		return err
 	}
 	server.Server = &tcpServer
+	server.Ip = tcpServer.Ip
+	server.Port = tcpServer.Port
 
 	rtpClient := udp_client.Create()
 	rtpClient.LocalPort = rtpClientLocalPort

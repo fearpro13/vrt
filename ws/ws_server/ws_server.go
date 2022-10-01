@@ -12,35 +12,49 @@ import (
 )
 
 type WSServer struct {
-	SessionId int64
+	SessionId int32
 	Ip        string
 	Port      int
 	handler   *http.Server
 	sync.Mutex
-	Clients   map[int64]*ws_client.WSClient
-	IsRunning bool
-	Callback  ws_client.WSClientCallback
+	Clients     map[int32]*ws_client.WSClient
+	IsRunning   bool
+	Callback    ws_client.WSClientCallback // DEPRECATED, USE Listeners instead
+	Listeners   map[int32]ws_client.WSClientCallback
+	HttpServer  *http.Server
+	HttpHandler *http.ServeMux
 }
 
 func Create() *WSServer {
-	server := &WSServer{SessionId: rand.Int63(), Clients: map[int64]*ws_client.WSClient{}}
+	mux := http.NewServeMux()
+	httpServer := &http.Server{Handler: mux}
+	server := &WSServer{
+		SessionId:   rand.Int31(),
+		Clients:     map[int32]*ws_client.WSClient{},
+		HttpHandler: mux,
+		HttpServer:  httpServer,
+		Listeners:   map[int32]ws_client.WSClientCallback{},
+	}
 
 	return server
 }
 
-func (server *WSServer) Start(ip string, port int) error {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", server.entryPointHandler)
-	httpServer := &http.Server{Addr: fmt.Sprintf("%s:%d", ip, port), Handler: mux}
-	go httpServer.ListenAndServe()
+func (server *WSServer) Start(path string, ip string, port int) error {
+	server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
+	server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
+	go server.HttpServer.ListenAndServe()
 
 	server.IsRunning = true
 
-	logger.Info(fmt.Sprintf("WS server #%d started on %s", server.SessionId, httpServer.Addr))
+	logger.Info(fmt.Sprintf("WS server #%d started on %s", server.SessionId, server.HttpServer.Addr))
 
 	go server.sync()
 
 	return nil
+}
+
+func (server *WSServer) AddRoute(route string, handlerFunc http.HandlerFunc) {
+	server.HttpHandler.HandleFunc(route, handlerFunc)
 }
 
 func (server *WSServer) Stop() error {
@@ -67,7 +81,7 @@ var upgrader = websocket.Upgrader{
 	EnableCompression: false,
 }
 
-func (server *WSServer) entryPointHandler(w http.ResponseWriter, r *http.Request) {
+func (server *WSServer) UpgradeToWebsocket(w http.ResponseWriter, r *http.Request) {
 	connection, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		logger.Error(err.Error())
@@ -80,8 +94,14 @@ func (server *WSServer) entryPointHandler(w http.ResponseWriter, r *http.Request
 	server.Clients[wsClient.SessionId] = wsClient
 	server.Unlock()
 
+	for _, listener := range server.Listeners {
+		if listener != nil {
+			go listener(wsClient, r.URL.Path)
+		}
+	}
+
 	if server.Callback != nil {
-		server.Callback(wsClient)
+		server.Callback(wsClient, r.URL.Path)
 	}
 }
 

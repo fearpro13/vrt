@@ -45,13 +45,13 @@ func main() {
 	}
 
 	wsServer1 := ws_server.Create()
-	err = wsServer1.Start("", 6061)
+	err = wsServer1.Start("/", "", 6061)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
 	wsBroadcast1 := rtsp_to_ws.NewBroadcast()
-	wsBroadcast1.BroadcastRtspClientToWebsockets(rtspProxyTcp.RtspClient, wsServer1)
+	wsBroadcast1.BroadcastRtspClientToWebsockets("/", rtspProxyTcp.RtspClient, wsServer1)
 
 	//////////////////////////////////////////////////////////
 	rtspProxyUdp := rtsp_proxy.Create()
@@ -62,13 +62,13 @@ func main() {
 	}
 
 	wsServer2 := ws_server.Create()
-	err = wsServer2.Start("", 6062)
+	err = wsServer2.Start("/", "", 6062)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
 	wsBroadcast2 := rtsp_to_ws.NewBroadcast()
-	wsBroadcast2.BroadcastRtspClientToWebsockets(rtspProxyUdp.RtspClient, wsServer2)
+	wsBroadcast2.BroadcastRtspClientToWebsockets("/", rtspProxyUdp.RtspClient, wsServer2)
 
 	////////////////////////////////////////////////////////////
 	rtspClientTcp := rtsp_client.Create()
@@ -79,13 +79,13 @@ func main() {
 	rtspClientTcp.Play()
 
 	wsServer3 := ws_server.Create()
-	err = wsServer3.Start("", 6063)
+	err = wsServer3.Start("/", "", 6063)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
 	wsBroadcast3 := rtsp_to_ws.NewBroadcast()
-	wsBroadcast3.BroadcastRtspClientToWebsockets(rtspClientTcp, wsServer3)
+	wsBroadcast3.BroadcastRtspClientToWebsockets("/", rtspClientTcp, wsServer3)
 
 	////////////////////////////////////////////////////////////
 	rtspClientUdp := rtsp_client.Create()
@@ -96,13 +96,13 @@ func main() {
 	rtspClientUdp.Play()
 
 	wsServer4 := ws_server.Create()
-	err = wsServer4.Start("", 6064)
+	err = wsServer4.Start("/", "", 6064)
 	if err != nil {
 		logger.Error(err.Error())
 	}
 
 	wsBroadcast4 := rtsp_to_ws.NewBroadcast()
-	wsBroadcast4.BroadcastRtspClientToWebsockets(rtspClientUdp, wsServer4)
+	wsBroadcast4.BroadcastRtspClientToWebsockets("/", rtspClientUdp, wsServer4)
 
 	//////////////////////////////////////////////////////////
 

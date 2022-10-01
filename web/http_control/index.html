@@ -1,0 +1,34 @@
+<html>
+<head>
+    <meta charset="UTF-8">
+    <script src="script.js"></script>
+    <script src="../script.js"></script>
+    <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+<div class="app">
+    <div class="proxy_list">
+        <div class="proxy_list-header">
+            <input type="text" id="rtsp_address">
+            <input type="button" value="Добавить прокси" onclick="addNewProxy()">
+            <input type="button" value="REFRESH" onclick="refreshProxyList()">
+        </div>
+        <table id="proxy_list" class="proxy_list-body">
+        </table>
+    </div>
+    <div class="broadcast_list">
+        <div class="broadcast_list-header">
+            <input type="text" id="broadcast_address">
+            <input type="button" value="Добавить трансляцию" onclick="addNewBroadcast()">
+            <input type="button" value="REFRESH" onclick="refreshBroadcastList()">
+        </div>
+        <table id="broadcast_list" class="broadcast_list-body">
+        </table>
+    </div>
+    <div class="preview">
+        <video controls width="500" height="360" id="preview">
+        </video>
+    </div>
+</div>
+</body>
+</html>

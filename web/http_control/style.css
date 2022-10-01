@@ -1,0 +1,27 @@
+.app{
+    display: flex;
+    flex-direction: row;
+}
+.proxy_list,.broadcast_list{
+    display: flex;
+    flex-direction: column;
+    border: 1px solid black;
+}
+
+.proxy_list-header,.broadcast_list-header{
+    display: flex;
+    flex-direction: row;
+}
+
+.proxy_list-body, .broadcast_list-body{
+    display: flex;
+    flex-direction: column;
+}
+
+.proxy_list-body > tr> td{
+    border: 1px solid gray;
+}
+
+.broadcast_list-body >tr>td{
+    border: 1px solid gray;
+}

@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/websocket"
 	"log"
 	"math"
+	"math/rand"
 	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
@@ -16,27 +17,35 @@ import (
 	"vrt/ws/ws_server"
 )
 
+type OnStopCallback func(broadcast *Broadcast)
+
 type Broadcast struct {
+	SessionId         int32
 	IsRunning         bool
-	rtspClient        *rtsp_client.RtspClient
+	RtspClient        *rtsp_client.RtspClient
 	wsServer          *ws_server.WSServer
-	clients           map[int64]*ws_client.WSClient
+	Clients           map[int32]*ws_client.WSClient
 	AVPacketChan      chan *av.Packet
 	AVPacketPreBuffer []*av.Packet
+	Path              string
+	OnStopListeners   map[int32]OnStopCallback
 }
 
 func NewBroadcast() *Broadcast {
 	broadcast := &Broadcast{
-		clients:           map[int64]*ws_client.WSClient{},
+		SessionId:         rand.Int31(),
+		Clients:           map[int32]*ws_client.WSClient{},
 		AVPacketChan:      make(chan *av.Packet, 1024),
 		AVPacketPreBuffer: []*av.Packet{},
+		OnStopListeners:   map[int32]OnStopCallback{},
 	}
 	return broadcast
 }
 
-func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(rtspClient *rtsp_client.RtspClient, wsServer *ws_server.WSServer) {
+func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspClient *rtsp_client.RtspClient, wsServer *ws_server.WSServer) {
+	broadcast.Path = path
 	broadcast.IsRunning = true
-	broadcast.rtspClient = rtspClient
+	broadcast.RtspClient = rtspClient
 	broadcast.wsServer = wsServer
 
 	rtspClient.SubscribeToRtpBuff(wsServer.SessionId, func(bytesPtr *[]byte, num int) {
@@ -73,10 +82,14 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(rtspClient *rtsp_cli
 		}
 	})
 
-	wsServer.Callback = func(client *ws_client.WSClient) {
-		broadcast.clients[client.SessionId] = client
-		client.SetCallback(func(client *ws_client.WSClient) {
-			delete(broadcast.clients, client.SessionId)
+	wsServer.Listeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
+		if relativeURLPath != broadcast.Path {
+			return
+		}
+
+		broadcast.Clients[client.SessionId] = client
+		client.SetCallback(func(client *ws_client.WSClient, relativeURLPath string) {
+			delete(broadcast.Clients, client.SessionId)
 			rtspClient.UnsubscribeFromRtpBuff(client.SessionId)
 		})
 
@@ -126,18 +139,24 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(rtspClient *rtsp_cli
 		}
 	}
 
-	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server started", rtspClient.SessionId, wsServer.SessionId))
+	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server started at %s", rtspClient.SessionId, wsServer.SessionId, path))
 }
 
 func (broadcast *Broadcast) Stop() {
+	delete(broadcast.wsServer.Listeners, broadcast.SessionId)
+
 	for _, wsClient := range broadcast.wsServer.Clients {
-		broadcast.rtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
+		broadcast.RtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
 		wsClient.SetCallback(nil)
 	}
 	broadcast.wsServer.Callback = nil
 	broadcast.IsRunning = false
 
-	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server stopped", broadcast.rtspClient.SessionId, broadcast.wsServer.SessionId))
+	for _, listener := range broadcast.OnStopListeners {
+		go listener(broadcast)
+	}
+
+	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server stopped", broadcast.RtspClient.SessionId, broadcast.wsServer.SessionId))
 }
 
 func RtpMux(rtspClient *rtsp_client.RtspClient, packets *[]av.Packet) (payload *[]byte) {

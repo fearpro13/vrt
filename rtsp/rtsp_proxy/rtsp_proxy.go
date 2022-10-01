@@ -11,14 +11,17 @@ import (
 	"vrt/rtsp/rtsp_server"
 )
 
+type OnStopCallback func(proxy *RtspProxy)
+
 type RtspProxy struct {
-	SessionId          int64
+	SessionId          int32
 	RtspClient         *rtsp_client.RtspClient
 	RtspServer         *rtsp_server.RtspServer
 	IsRunning          bool
-	PreBufferedClients map[int64]bool
+	PreBufferedClients map[int32]bool
 	RTPPreBuff         []*[]byte
 	clientSelfHosted   bool // if rtsp client was created within rtsp_proxy, not outside
+	OnStopListeners    map[int32]OnStopCallback
 }
 
 type RtpFragmentationInfo struct {
@@ -30,10 +33,11 @@ func Create() *RtspProxy {
 	server := rtsp_server.Create()
 
 	proxy := &RtspProxy{
-		SessionId:          rand.Int63(),
+		SessionId:          rand.Int31(),
 		RtspServer:         server,
 		RTPPreBuff:         []*[]byte{},
-		PreBufferedClients: map[int64]bool{},
+		PreBufferedClients: map[int32]bool{},
+		OnStopListeners:    map[int32]OnStopCallback{},
 	}
 
 	return proxy
@@ -121,6 +125,10 @@ func (proxy *RtspProxy) Stop() error {
 	}
 
 	err := server.Stop()
+
+	for _, listener := range proxy.OnStopListeners {
+		go listener(proxy)
+	}
 
 	return err
 }
