@@ -55,7 +55,7 @@ func (server *RtspServer) Start(ip string, port int, rtpClientLocalPort int) err
 	if err != nil {
 		return err
 	}
-	server.Server = &tcpServer
+	server.Server = tcpServer
 	server.Ip = tcpServer.Ip
 	server.Port = tcpServer.Port
 

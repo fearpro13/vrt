@@ -148,6 +148,7 @@ func (broadcast *Broadcast) Stop() {
 	for _, wsClient := range broadcast.wsServer.Clients {
 		broadcast.RtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
 		wsClient.SetCallback(nil)
+		wsClient.Disconnect()
 	}
 	broadcast.wsServer.Callback = nil
 	broadcast.IsRunning = false

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 	"vrt/logger"
+	"vrt/tcp/tcp_server"
 	"vrt/ws/ws_client"
 )
 
@@ -17,12 +18,13 @@ type WSServer struct {
 	Port      int
 	handler   *http.Server
 	sync.Mutex
-	Clients     map[int32]*ws_client.WSClient
-	IsRunning   bool
-	Callback    ws_client.WSClientCallback // DEPRECATED, USE Listeners instead
-	Listeners   map[int32]ws_client.WSClientCallback
-	HttpServer  *http.Server
-	HttpHandler *http.ServeMux
+	Clients       map[int32]*ws_client.WSClient
+	IsRunning     bool
+	Callback      ws_client.WSClientCallback // DEPRECATED, USE Listeners instead
+	Listeners     map[int32]ws_client.WSClientCallback
+	HttpServer    *http.Server
+	HttpHandler   *http.ServeMux
+	HttpTcpServer *tcp_server.TcpServer
 }
 
 func Create() *WSServer {
@@ -42,11 +44,16 @@ func Create() *WSServer {
 func (server *WSServer) Start(path string, ip string, port int) error {
 	server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
 	server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
-	go server.HttpServer.ListenAndServe()
+
+	tcpServer := tcp_server.Create()
+	tcpServer.Start("", port)
+	server.HttpTcpServer = tcpServer
+
+	go server.HttpServer.Serve(tcpServer.Socket)
 
 	server.IsRunning = true
 
-	logger.Info(fmt.Sprintf("WS server #%d started on %s", server.SessionId, server.HttpServer.Addr))
+	logger.Info(fmt.Sprintf("WS server #%d started on %s:%d", server.SessionId, tcpServer.Ip, tcpServer.Port))
 
 	go server.sync()
 

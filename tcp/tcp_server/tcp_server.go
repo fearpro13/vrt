@@ -23,9 +23,9 @@ type TcpServer struct {
 	IsRunning bool
 }
 
-func Create() (server TcpServer) {
+func Create() (server *TcpServer) {
 	id := rand.Int63()
-	server = TcpServer{Id: id}
+	server = &TcpServer{Id: id}
 
 	return server
 }

@@ -107,12 +107,6 @@ func (command *Command) Init(commandArguments *[]string) error {
 				return errors.New(fmt.Sprintf("Wrong option %s, most probably you are missing prefix '-'", curArg))
 			}
 		} else {
-			if curPos+1 > len(arguments)-1 {
-				return errors.New(fmt.Sprintf("Found option name %s, but without option value", curArg))
-			}
-
-			nextArg := arguments[curPos+1]
-
 			optionName := optionNameExp.FindStringSubmatch(curArg)[1]
 
 			flag, flagExist := command.flagsByName[optionName]
@@ -123,6 +117,12 @@ func (command *Command) Init(commandArguments *[]string) error {
 				curPos += 1
 				continue
 			}
+
+			if curPos+1 > len(arguments)-1 {
+				return errors.New(fmt.Sprintf("Found option name %s, but without option value", curArg))
+			}
+
+			nextArg := arguments[curPos+1]
 
 			option, optionExist := command.optionsByName[optionName]
 			if !optionExist {
