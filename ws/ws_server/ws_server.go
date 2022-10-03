@@ -6,7 +6,6 @@ import (
 	"math/rand"
 	"net/http"
 	"sync"
-	"time"
 	"vrt/logger"
 	"vrt/tcp/tcp_server"
 	"vrt/ws/ws_client"
@@ -18,24 +17,23 @@ type WSServer struct {
 	Port      int
 	handler   *http.Server
 	sync.Mutex
-	Clients       map[int32]*ws_client.WSClient
-	IsRunning     bool
-	Callback      ws_client.WSClientCallback // DEPRECATED, USE Listeners instead
-	Listeners     map[int32]ws_client.WSClientCallback
-	HttpServer    *http.Server
-	HttpHandler   *http.ServeMux
-	HttpTcpServer *tcp_server.TcpServer
+	Clients            map[int32]*ws_client.WSClient
+	IsRunning          bool
+	OnConnectListeners map[int32]ws_client.WSClientCallback
+	HttpServer         *http.Server
+	HttpHandler        *http.ServeMux
+	HttpTcpServer      *tcp_server.TcpServer
 }
 
 func Create() *WSServer {
 	mux := http.NewServeMux()
 	httpServer := &http.Server{Handler: mux}
 	server := &WSServer{
-		SessionId:   rand.Int31(),
-		Clients:     map[int32]*ws_client.WSClient{},
-		HttpHandler: mux,
-		HttpServer:  httpServer,
-		Listeners:   map[int32]ws_client.WSClientCallback{},
+		SessionId:          rand.Int31(),
+		Clients:            map[int32]*ws_client.WSClient{},
+		HttpHandler:        mux,
+		HttpServer:         httpServer,
+		OnConnectListeners: map[int32]ws_client.WSClientCallback{},
 	}
 
 	return server
@@ -46,7 +44,10 @@ func (server *WSServer) Start(path string, ip string, port int) error {
 	server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
 
 	tcpServer := tcp_server.Create()
-	tcpServer.Start("", port)
+	err := tcpServer.Start("", port)
+	if err != nil {
+		return err
+	}
 	server.HttpTcpServer = tcpServer
 
 	go server.HttpServer.Serve(tcpServer.Socket)
@@ -55,17 +56,15 @@ func (server *WSServer) Start(path string, ip string, port int) error {
 
 	logger.Info(fmt.Sprintf("WS server #%d started on %s:%d", server.SessionId, tcpServer.Ip, tcpServer.Port))
 
-	go server.sync()
-
 	return nil
-}
-
-func (server *WSServer) AddRoute(route string, handlerFunc http.HandlerFunc) {
-	server.HttpHandler.HandleFunc(route, handlerFunc)
 }
 
 func (server *WSServer) Stop() error {
 	server.IsRunning = false
+
+	for _, client := range server.Clients {
+		_ = client.Disconnect()
+	}
 
 	err := server.handler.Close()
 	logger.Info(fmt.Sprintf("WS #%d stopped", server.SessionId))
@@ -101,28 +100,13 @@ func (server *WSServer) UpgradeToWebsocket(w http.ResponseWriter, r *http.Reques
 	server.Clients[wsClient.SessionId] = wsClient
 	server.Unlock()
 
-	for _, listener := range server.Listeners {
-		if listener != nil {
-			go listener(wsClient, r.URL.Path)
-		}
+	wsClient.OnDisconnectListeners[server.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
+		server.Lock()
+		delete(server.Clients, wsClient.SessionId)
+		server.Unlock()
 	}
 
-	if server.Callback != nil {
-		server.Callback(wsClient, r.URL.Path)
-	}
-}
-
-func (server *WSServer) sync() {
-	for server.IsRunning {
-		for _, client := range server.Clients {
-			if !client.IsConnected {
-				server.Lock()
-				delete(server.Clients, client.SessionId)
-				server.Unlock()
-				logger.Debug(fmt.Sprintf("Cleaned up #%d WS client from WS server", client.SessionId))
-				logger.Debug(fmt.Sprintf("Current number of WS server clients:%d", len(server.Clients)))
-			}
-		}
-		time.Sleep(20 * time.Millisecond)
+	for _, listener := range server.OnConnectListeners {
+		go listener(wsClient, r.URL.Path)
 	}
 }

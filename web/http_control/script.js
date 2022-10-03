@@ -142,8 +142,14 @@ function refreshProxyList(){
         })
 }
 
-let broadcastPreview = (address) => {
-    new websocketStream(address,'preview')
+    let preview;
+    let broadcastPreview = (address) => {
+    if (preview !== null && preview!==undefined){
+        console.log(preview)
+        preview.disconnect()
+        preview.destroy()
+    }
+    preview = new websocketStream(address,'preview')
 }
 
 

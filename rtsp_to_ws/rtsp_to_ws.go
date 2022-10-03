@@ -7,9 +7,9 @@ import (
 	"github.com/deepch/vdk/codec/h264parser"
 	"github.com/deepch/vdk/format/mp4f"
 	"github.com/gorilla/websocket"
-	"log"
 	"math"
 	"math/rand"
+	"sync"
 	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
@@ -20,15 +20,17 @@ import (
 type OnStopCallback func(broadcast *Broadcast)
 
 type Broadcast struct {
-	SessionId         int32
-	IsRunning         bool
-	RtspClient        *rtsp_client.RtspClient
-	wsServer          *ws_server.WSServer
+	SessionId  int32
+	IsRunning  bool
+	RtspClient *rtsp_client.RtspClient
+	wsServer   *ws_server.WSServer
+	sync.Mutex
 	Clients           map[int32]*ws_client.WSClient
 	AVPacketChan      chan *av.Packet
 	AVPacketPreBuffer []*av.Packet
 	Path              string
 	OnStopListeners   map[int32]OnStopCallback
+	Muxer             *mp4f.Muxer
 }
 
 func NewBroadcast() *Broadcast {
@@ -48,7 +50,21 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 	broadcast.RtspClient = rtspClient
 	broadcast.wsServer = wsServer
 
-	rtspClient.SubscribeToRtpBuff(wsServer.SessionId, func(bytesPtr *[]byte, num int) {
+	muxer := mp4f.NewMuxer(nil)
+	broadcast.Muxer = muxer
+	codecs := broadcast.RtspClient.Codecs
+	err := muxer.WriteHeader(codecs)
+	if err != nil {
+		logger.Error(err.Error())
+		return
+	}
+	meta, init := muxer.GetInit(codecs)
+
+	rtspClient.OnDisconnectListeners[broadcast.SessionId] = func(client *rtsp_client.RtspClient) {
+		broadcast.Stop()
+	}
+
+	rtspClient.SubscribeToRtpBuff(broadcast.SessionId, func(bytesPtr *[]byte, num int) {
 		bytes := *bytesPtr
 		if len(bytes) == 0 {
 			return
@@ -82,25 +98,10 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 		}
 	})
 
-	wsServer.Listeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
+	wsServer.OnConnectListeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
 		if relativeURLPath != broadcast.Path {
 			return
 		}
-
-		broadcast.Clients[client.SessionId] = client
-		client.SetCallback(func(client *ws_client.WSClient, relativeURLPath string) {
-			delete(broadcast.Clients, client.SessionId)
-			rtspClient.UnsubscribeFromRtpBuff(client.SessionId)
-		})
-
-		muxer := mp4f.NewMuxer(nil)
-		codecs := rtspClient.Codecs
-		err := muxer.WriteHeader(codecs)
-		if err != nil {
-			log.Println("muxer.WriteHeader", err)
-			return
-		}
-		meta, init := muxer.GetInit(codecs)
 
 		err = client.Send(websocket.BinaryMessage, append([]byte{9}, meta...))
 		if err != nil {
@@ -121,68 +122,68 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 				}
 
 				if len(hRaw) > 0 {
-					client.Send(websocket.BinaryMessage, hRaw)
+					_ = client.Send(websocket.BinaryMessage, hRaw)
 				}
 			}
 		}
 
-		for client.IsConnected {
-			packet := <-broadcast.AVPacketChan
-			_, hRaw, err := muxer.WritePacket(*packet, false)
-			if err != nil {
-				logger.Error(err.Error())
-			}
+		broadcast.Lock()
+		broadcast.Clients[client.SessionId] = client
+		broadcast.Unlock()
 
-			if len(hRaw) > 0 {
-				client.Send(websocket.BinaryMessage, hRaw)
-			}
+		client.OnDisconnectListeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
+			broadcast.Lock()
+			delete(broadcast.Clients, client.SessionId)
+			broadcast.Unlock()
 		}
 	}
+
+	go broadcast.broadcastRTP()
 
 	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server started at %s", rtspClient.SessionId, wsServer.SessionId, path))
 }
 
-func (broadcast *Broadcast) Stop() {
-	delete(broadcast.wsServer.Listeners, broadcast.SessionId)
+func (broadcast *Broadcast) broadcastRTP() {
+	for broadcast.IsRunning {
+		packet := <-broadcast.AVPacketChan
 
-	for _, wsClient := range broadcast.wsServer.Clients {
-		broadcast.RtspClient.UnsubscribeFromRtpBuff(wsClient.SessionId)
-		wsClient.SetCallback(nil)
-		wsClient.Disconnect()
+		_, hRaw, err := broadcast.Muxer.WritePacket(*packet, false)
+		if err != nil {
+			logger.Error(err.Error())
+		}
+
+		if len(hRaw) == 0 {
+			continue
+		}
+
+		for _, client := range broadcast.Clients {
+			if client.IsConnected {
+				_ = client.Send(websocket.BinaryMessage, hRaw)
+			}
+		}
 	}
-	broadcast.wsServer.Callback = nil
+}
+
+func (broadcast *Broadcast) Stop() {
+	if !broadcast.IsRunning {
+		return
+	}
+
 	broadcast.IsRunning = false
+
+	delete(broadcast.wsServer.OnConnectListeners, broadcast.SessionId)
+
+	broadcast.RtspClient.UnsubscribeFromRtpBuff(broadcast.SessionId)
+
+	for _, wsClient := range broadcast.Clients {
+		_ = wsClient.Disconnect()
+	}
 
 	for _, listener := range broadcast.OnStopListeners {
 		go listener(broadcast)
 	}
 
 	logger.Info(fmt.Sprintf("RTSP client #%d broadcast to #%d Websocket server stopped", broadcast.RtspClient.SessionId, broadcast.wsServer.SessionId))
-}
-
-func RtpMux(rtspClient *rtsp_client.RtspClient, packets *[]av.Packet) (payload *[]byte) {
-	rtpHeader := make([]byte, 12)
-	version := 2                           // 0, 0-1, 2 bits
-	padding := 0                           //0, 2, 1 bit
-	extension := 0                         // 0, 3 , 1 bit
-	csrcCount := 0                         //0, 4-7, 4 bit
-	marker := 0                            //1, 0, 1 bit
-	payloadType := 0                       // 1, 1-7, 7 bits
-	sequenceNumber := 0                    //2-3 full, 16 bit
-	timestamp := uint32(time.Now().Unix()) //4-7 full, 32 bit
-	ssrc := 0                              //8-11 full, 32 bit
-
-	var firstByte, secondByte int
-	firstByte = version | (padding << 2) | (extension << 3) | (csrcCount << 4)
-	secondByte = marker | (payloadType << 1)
-
-	rtpHeader[0] = byte(firstByte)
-	rtpHeader[1] = byte(secondByte)
-	binary.BigEndian.PutUint16(rtpHeader[2:3], uint16(sequenceNumber))
-	binary.BigEndian.PutUint32(rtpHeader[4:7], uint32(timestamp))
-	binary.BigEndian.PutUint32(rtpHeader[8:11], uint32(ssrc))
-
-	return nil
 }
 
 func RtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Packet, bool) {

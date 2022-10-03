@@ -50,7 +50,7 @@ class websocketStream {
     }
 
     disconnect = () => {
-        this.ws.close(0,"Disconnected manually")
+        this.ws.close(1000,"Disconnected manually")
     }
 
     destroy = () => {

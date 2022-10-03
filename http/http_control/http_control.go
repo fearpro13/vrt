@@ -358,7 +358,7 @@ func (controlServer *HttpControlServer) StopWsBroadcast(broadcastId int32) error
 		return errors.New("broadcast does not exist")
 	}
 	broadcast.Stop()
-	delete(controlServer.RtspProxies, broadcastId)
+	delete(controlServer.WsBroadcasts, broadcastId)
 	delete(controlServer.proxyByRemoteAddress, broadcast.RtspClient.RemoteAddress)
 
 	return nil

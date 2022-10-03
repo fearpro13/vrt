@@ -15,23 +15,24 @@ import (
 type onDisconnectCallback func(client *TcpClient)
 
 type TcpClient struct {
-	SessionId    int64
-	Ip           string
-	Port         int
-	Socket       *net.TCPConn
-	IO           *bufio.ReadWriter
-	IsConnected  bool
-	OnDisconnect onDisconnectCallback
-	WriteTimeout time.Duration
-	ReadTimeout  time.Duration
+	SessionId             int32
+	Ip                    string
+	Port                  int
+	Socket                *net.TCPConn
+	IO                    *bufio.ReadWriter
+	IsConnected           bool
+	OnDisconnectListeners map[int32]onDisconnectCallback
+	WriteTimeout          time.Duration
+	ReadTimeout           time.Duration
 }
 
 func Create() *TcpClient {
-	id := rand.Int63()
+	id := rand.Int31()
 	client := &TcpClient{
-		SessionId:    id,
-		WriteTimeout: 1 * time.Second,
-		ReadTimeout:  1 * time.Second,
+		SessionId:             id,
+		WriteTimeout:          1 * time.Second,
+		ReadTimeout:           1 * time.Second,
+		OnDisconnectListeners: map[int32]onDisconnectCallback{},
 	}
 
 	return client
@@ -197,8 +198,8 @@ func (client *TcpClient) Disconnect() error {
 
 	err := client.Socket.Close()
 
-	if client.OnDisconnect != nil {
-		client.OnDisconnect(client)
+	for _, listener := range client.OnDisconnectListeners {
+		go listener(client)
 	}
 
 	return err
