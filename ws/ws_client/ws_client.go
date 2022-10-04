@@ -22,10 +22,9 @@ type WSClient struct {
 }
 
 func Create() *WSClient {
-	buff := make(chan []byte, 2048)
 	client := &WSClient{
 		SessionId:             rand.Int31(),
-		RecvBuff:              buff,
+		RecvBuff:              make(chan []byte, 2048),
 		OnDisconnectListeners: map[int32]WSClientCallback{},
 	}
 

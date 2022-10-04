@@ -30,7 +30,7 @@ type Broadcast struct {
 	AVPacketPreBuffer []*av.Packet
 	Path              string
 	OnStopListeners   map[int32]OnStopCallback
-	Muxer             *mp4f.Muxer
+	Muxers            map[int32]*mp4f.Muxer
 }
 
 func NewBroadcast() *Broadcast {
@@ -40,6 +40,7 @@ func NewBroadcast() *Broadcast {
 		AVPacketChan:      make(chan *av.Packet, 1024),
 		AVPacketPreBuffer: []*av.Packet{},
 		OnStopListeners:   map[int32]OnStopCallback{},
+		Muxers:            map[int32]*mp4f.Muxer{},
 	}
 	return broadcast
 }
@@ -50,15 +51,7 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 	broadcast.RtspClient = rtspClient
 	broadcast.wsServer = wsServer
 
-	muxer := mp4f.NewMuxer(nil)
-	broadcast.Muxer = muxer
-	codecs := broadcast.RtspClient.Codecs
-	err := muxer.WriteHeader(codecs)
-	if err != nil {
-		logger.Error(err.Error())
-		return
-	}
-	meta, init := muxer.GetInit(codecs)
+	wsServer.HttpHandler.HandleFunc(path, wsServer.UpgradeToWebsocket)
 
 	rtspClient.OnDisconnectListeners[broadcast.SessionId] = func(client *rtsp_client.RtspClient) {
 		broadcast.Stop()
@@ -103,6 +96,15 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 			return
 		}
 
+		muxer := mp4f.NewMuxer(nil)
+		codecs := broadcast.RtspClient.Codecs
+		err := muxer.WriteHeader(codecs)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		meta, init := muxer.GetInit(codecs)
+
 		err = client.Send(websocket.BinaryMessage, append([]byte{9}, meta...))
 		if err != nil {
 			logger.Error(err.Error())
@@ -129,11 +131,13 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 
 		broadcast.Lock()
 		broadcast.Clients[client.SessionId] = client
+		broadcast.Muxers[client.SessionId] = muxer
 		broadcast.Unlock()
 
 		client.OnDisconnectListeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
 			broadcast.Lock()
 			delete(broadcast.Clients, client.SessionId)
+			delete(broadcast.Muxers, client.SessionId)
 			broadcast.Unlock()
 		}
 	}
@@ -147,16 +151,16 @@ func (broadcast *Broadcast) broadcastRTP() {
 	for broadcast.IsRunning {
 		packet := <-broadcast.AVPacketChan
 
-		_, hRaw, err := broadcast.Muxer.WritePacket(*packet, false)
-		if err != nil {
-			logger.Error(err.Error())
-		}
-
-		if len(hRaw) == 0 {
-			continue
-		}
-
 		for _, client := range broadcast.Clients {
+			_, hRaw, err := broadcast.Muxers[client.SessionId].WritePacket(*packet, false)
+			if err != nil {
+				logger.Error(err.Error())
+			}
+
+			if len(hRaw) == 0 {
+				continue
+			}
+
 			if client.IsConnected {
 				_ = client.Send(websocket.BinaryMessage, hRaw)
 			}

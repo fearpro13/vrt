@@ -1,6 +1,7 @@
 
+    var host = "10.0.43.19:6060"
     let addProxy = (address,port) => {
-        let uri = `http://localhost:6060/add_proxy`
+        let uri = `http://${host}/add_proxy`
         let config = {
             method:'POST',
             body:JSON.stringify({
@@ -12,7 +13,7 @@
     }
 
     let stopProxy = (id) => {
-        let uri = `http://localhost:6060/stop_proxy`
+        let uri = `http://${host}/stop_proxy`
         let config = {
             method:'POST',
             body:JSON.stringify({id})
@@ -21,13 +22,13 @@
     }
 
     let proxyList = async () => {
-        let uri = `http://localhost:6060/proxy_list`
+        let uri = `http://${host}/proxy_list`
         let response = await fetch(uri)
         return await response.json()
     }
 
     let addBroadcast = address => {
-        let uri = `http://localhost:6060/add_broadcast`
+        let uri = `http://${host}/add_broadcast`
         let config = {
             method:'POST',
             body:JSON.stringify({
@@ -38,7 +39,7 @@
     }
 
     let stopBroadcast = (id) => {
-        let uri = `http://localhost:6060/stop_broadcast`
+        let uri = `http://${host}/stop_broadcast`
         let config = {
             method:'POST',
             body:JSON.stringify({id})
@@ -47,7 +48,7 @@
     }
 
     let broadcastList = async () => {
-        let uri = `http://localhost:6060/broadcast_list`
+        let uri = `http://${host}/broadcast_list`
         let response = await fetch(uri)
         return await response.json()
     }
@@ -83,7 +84,7 @@ function addNewBroadcast(){
                     col3.innerHTML = broadcast.local_address
                     col3.style.cursor='pointer'
                     col3.onclick=()=>{
-                        let address = `ws://localhost:6060${broadcast.local_address}`
+                        let address = `ws://${host}${broadcast.local_address}`
                         broadcastPreview(address)
                     }
                     row.append(col3)

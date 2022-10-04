@@ -14,7 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"vrt/auth/digest"
 	"vrt/logger"
+	"vrt/rtsp"
 	"vrt/tcp/tcp_client"
 	"vrt/udp/udp_client"
 	"vrt/udp/udp_server"
@@ -34,8 +36,11 @@ type RtspClient struct {
 	RtpClient                     *udp_client.UdpClient
 	SessionId                     int32
 	CSeq                          int
+	Auth                          *digest.Auth
 	RemoteAddress                 string
-	RemoteStreamAddress           string
+	Login                         string
+	Password                      string
+	RemoteStreamAddress           string //contains trackId or e.t.c
 	LocalRtpServerPort            int
 	RemoteRtpServerPort           int //required for udp hair pinning
 	IsConnected                   bool
@@ -93,8 +98,11 @@ func (rtspClient *RtspClient) Connect(address string, transport string) error {
 	}
 	rtspClient.Transport = transport
 
-	hasRtsp, _ := regexp.MatchString("^rtsp:/{2}", address)
-	hasCreds, _ := regexp.MatchString("\\w+:\\w+", address)
+	hasRtspExp := regexp.MustCompile("^rtsp:/{2}")
+	hasCredsExp := regexp.MustCompile("(\\w+):(\\w+)")
+
+	hasRtsp := hasRtspExp.MatchString(address)
+	hasCreds := hasCredsExp.MatchString(address)
 
 	if !hasRtsp {
 		return errors.New(fmt.Sprintf("RTSP rtspClient #%d: Отсутствует префикс rtsp://", rtspClient.SessionId))
@@ -103,6 +111,10 @@ func (rtspClient *RtspClient) Connect(address string, transport string) error {
 	if !hasCreds {
 		return errors.New(fmt.Sprintf("RTSP rtspClient #%d: отсутсвуют данные для авторизации BasicAuth", rtspClient.SessionId))
 	}
+
+	creds := hasCredsExp.FindStringSubmatch(address)
+	rtspClient.Login = creds[1]
+	rtspClient.Password = creds[2]
 
 	ipExp, _ := regexp.Compile("\\b(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\b")
 	ip := ipExp.FindString(address)
@@ -124,7 +136,7 @@ func (rtspClient *RtspClient) Connect(address string, transport string) error {
 	}
 
 	rtspClient.TcpClient.OnDisconnectListeners[rtspClient.SessionId] = func(client *tcp_client.TcpClient) {
-		rtspClient.Disconnect()
+		_ = rtspClient.Disconnect()
 	}
 
 	err := rtspClient.TcpClient.Connect(ip, portInt)
@@ -148,22 +160,22 @@ func (rtspClient *RtspClient) ConnectAndPlay(address string, transport string) e
 	}
 
 	if !rtspClient.IsPlaying {
-		_, err = rtspClient.Describe()
+		_, _, err = rtspClient.Describe()
 		if err != nil {
 			return err
 		}
 
-		_, err = rtspClient.Options()
+		_, _, err = rtspClient.Options()
 		if err != nil {
 			return err
 		}
 
-		_, err = rtspClient.Setup()
+		_, _, err = rtspClient.Setup()
 		if err != nil {
 			return err
 		}
 
-		_, err = rtspClient.Play()
+		_, _, err = rtspClient.Play()
 		if err != nil {
 			return err
 		}
@@ -179,7 +191,7 @@ func (rtspClient *RtspClient) Disconnect() error {
 
 	rtspClient.IsConnected = false
 
-	for uid, _ := range rtspClient.RtpSubscribers {
+	for uid := range rtspClient.RtpSubscribers {
 		rtspClient.UnsubscribeFromRtpBuff(uid)
 	}
 
@@ -219,68 +231,51 @@ func (rtspClient *RtspClient) Disconnect() error {
 	return nil
 }
 
-func (rtspClient *RtspClient) Describe() (response string, err error) {
-	message := ""
-	message += fmt.Sprintf("DESCRIBE %s RTSP/1.0\r\n", rtspClient.RemoteAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
-	message += "Accept: application/sdp\r\n"
-	message += "\r\n"
+func (rtspClient *RtspClient) Describe() (status int, response string, err error) {
+	request := rtsp.NewRequest(rtsp.DESCRIBE, rtspClient.RemoteAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
 
 	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
-	if err != nil {
-		return "", nil
-	}
 
-	response, err = rtspClient.ReadMessage()
-	if err != nil {
-		return "", err
-	}
+	status, response, err = rtspClient.SendMessage(request)
+
 	parseSdp(rtspClient, &response)
 
-	return response, err
+	return status, response, err
 }
 
-func (rtspClient *RtspClient) Options() (response string, err error) {
-	message := ""
-	message += fmt.Sprintf("OPTIONS %s RTSP/1.0\r\n", rtspClient.RemoteAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
-
-	message += "Accept: application/sdp\r\n"
-	message += "\r\n"
+func (rtspClient *RtspClient) Options() (status int, response string, err error) {
+	request := rtsp.NewRequest(rtsp.OPTIONS, rtspClient.RemoteAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
 
 	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
 
-	if err != nil {
-		return "", nil
-	}
+	status, response, err = rtspClient.SendMessage(request)
 
-	return rtspClient.ReadMessage()
+	return status, response, err
 }
 
-func (rtspClient *RtspClient) Setup() (response string, err error) {
-	message := ""
-	message += fmt.Sprintf("SETUP %s RTSP/1.0\r\n", rtspClient.RemoteStreamAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
+func (rtspClient *RtspClient) Setup() (status int, response string, err error) {
+	request := rtsp.NewRequest(rtsp.SETUP, rtspClient.RemoteStreamAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
+
+	rtspClient.CSeq++
 
 	if rtspClient.Transport == RtspTransportTcp {
-		message += fmt.Sprintf("Transport: RTP/AVP/TCP;unicast;interleaved=0-1\r\n")
+		request.AddHeader("Transport", "RTP/AVP/TCP;unicast;interleaved=0-1")
 	}
 
 	if rtspClient.Transport == RtspTransportUdp {
 		randPortInt := rand.Intn(64000) + 1024
 		rtspClient.LocalRtpServerPort = randPortInt
 
-		message += fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d\r\n", randPortInt, randPortInt+1)
+		request.AddHeader("Transport", fmt.Sprintf("RTP/AVP/UDP;unicast;client_port=%d-%d", randPortInt, randPortInt+1))
 	}
 
-	message += "\r\n"
-
-	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
-
-	response, err = rtspClient.ReadMessage()
+	status, response, err = rtspClient.SendMessage(request)
 
 	lines := strings.Split(response, "\r\n")
 	for _, line := range lines {
@@ -289,7 +284,7 @@ func (rtspClient *RtspClient) Setup() (response string, err error) {
 			serverPort := serverPortExp.FindStringSubmatch(line)[1]
 			rtspClient.RemoteRtpServerPort, err = strconv.Atoi(serverPort)
 			if err != nil {
-				return "", err
+				return status, "", err
 			}
 		}
 
@@ -298,7 +293,7 @@ func (rtspClient *RtspClient) Setup() (response string, err error) {
 			sessionIdString := sessionExp.FindStringSubmatch(line)[1]
 			sessionIdInt, err := strconv.Atoi(sessionIdString)
 			if err != nil {
-				return "", err
+				return status, "", err
 			}
 			rtspClient.SessionId = int32(sessionIdInt)
 		}
@@ -310,17 +305,17 @@ func (rtspClient *RtspClient) Setup() (response string, err error) {
 		udpClient.LocalPort = rtspClient.LocalRtpServerPort
 		err = udpClient.Connect(rtspClient.TcpClient.Ip, rtspClient.RemoteRtpServerPort)
 		if err != nil {
-			return "", err
+			return status, "", err
 		}
 
 		err = udpClient.SendMessage("HAIR PINNING;IGNORE THIS MESSAGE")
 		if err != nil {
-			return "", err
+			return status, "", err
 		}
 
 		err = udpClient.Disconnect()
 		if err != nil {
-			return "", err
+			return status, "", err
 		}
 		//////////////////////////////////////////
 
@@ -329,35 +324,30 @@ func (rtspClient *RtspClient) Setup() (response string, err error) {
 
 		err := rtpServer.Start("", rtspClient.LocalRtpServerPort)
 		if err != nil {
-			return "", err
+			return status, "", err
 		}
 	}
 
-	return response, err
+	return status, response, err
 }
 
-func (rtspClient *RtspClient) Play() (response string, err error) {
+func (rtspClient *RtspClient) Play() (status int, response string, err error) {
 	if rtspClient.SessionId == 0 {
-		return "", errors.New("для начала воспроизведения необходимо получить sessionId от сервера")
+		return 0, "", errors.New("для начала воспроизведения необходимо получить sessionId от сервера")
 	}
 
-	message := ""
-	message += fmt.Sprintf("PLAY %s RTSP/1.0\r\n", rtspClient.RemoteAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
-	message += fmt.Sprintf("Session:%d\r\n", rtspClient.SessionId)
-	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
-	message += "\r\n"
+	request := rtsp.NewRequest(rtsp.PLAY, rtspClient.RemoteAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
+	request.AddHeader("Session", strconv.Itoa(int(rtspClient.SessionId)))
+	request.AddHeader("Accept", "application/sdp")
 
 	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
+
+	status, response, err = rtspClient.SendMessage(request)
 
 	if err != nil {
-		return "", err
-	}
-
-	response, err = rtspClient.ReadMessage()
-	if err != nil {
-		return "", err
+		return 0, "", err
 	}
 
 	rtpTimeExp := regexp.MustCompile("rtptime=(\\d+)")
@@ -367,7 +357,7 @@ func (rtspClient *RtspClient) Play() (response string, err error) {
 			rtpTimeString := rtpTimeExp.FindStringSubmatch(responseLine)[1]
 			rtpTimeInt, err := strconv.ParseInt(rtpTimeString, 10, 64)
 			if err != nil {
-				return "", nil
+				return 0, "", nil
 			}
 			rtspClient.StartVideoTimestamp = rtpTimeInt
 			break
@@ -383,68 +373,100 @@ func (rtspClient *RtspClient) Play() (response string, err error) {
 	go rtspClient.run()
 	go rtspClient.broadcastRTP()
 
-	return response, err
+	return status, response, err
 }
 
-func (rtspClient *RtspClient) Pause() (response string, err error) {
+func (rtspClient *RtspClient) Pause() (status int, response string, err error) {
 	if rtspClient.SessionId == 0 {
-		return "", errors.New("для начала воспроизведения необходимо получить sessionId от сервера")
+		return 0, "", errors.New("для начала воспроизведения необходимо получить sessionId от сервера")
 	}
 
-	message := ""
-	message += fmt.Sprintf("PAUSE %s RTSP/1.0\r\n", rtspClient.RemoteAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
-	message += fmt.Sprintf("Session:%d", rtspClient.SessionId)
-	message += "Accept: application/sdp, application/rtsl, application/mheg\r\n"
-	message += "\r\n"
+	request := rtsp.NewRequest(rtsp.PAUSE, rtspClient.RemoteAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
+	request.AddHeader("Session", strconv.Itoa(int(rtspClient.SessionId)))
+	request.AddHeader("Accept", "application/sdp")
 
-	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
-	if err != nil {
-		return "", err
-	}
-
-	return rtspClient.ReadMessage()
+	return rtspClient.SendMessage(request)
 }
 
-func (rtspClient *RtspClient) TearDown() (response string, err error) {
+func (rtspClient *RtspClient) TearDown() (status int, response string, err error) {
 	rtspClient.IsPlaying = false
 
-	message := ""
-	message += fmt.Sprintf("TEARDOWN %s RTSP/1.0\r\n", rtspClient.RemoteAddress)
-	message += fmt.Sprintf("CSeq: %d\r\n", rtspClient.CSeq)
-	message += fmt.Sprintf("Session:%d", rtspClient.SessionId)
-	message += "Accept: application/sdp\r\n"
-	message += "\r\n"
+	request := rtsp.NewRequest(rtsp.TEARDOWN, rtspClient.RemoteAddress)
+	request.AddHeader(rtsp.CSeq, strconv.Itoa(rtspClient.CSeq))
+	request.AddHeader("Accept", "application/sdp")
+	request.AddHeader("Session", strconv.Itoa(int(rtspClient.SessionId)))
+	request.AddHeader("Accept", "application/sdp")
 
-	rtspClient.CSeq++
-	_, err = rtspClient.TcpClient.SendString(message)
-	if err != nil {
-		return "", err
-	}
-
-	return response, err
+	return rtspClient.SendMessage(request)
 }
 
 const VIDEO = "video"
 const AUDIO = "audio"
 
-func (rtspClient *RtspClient) ReadMessage() (message string, err error) {
+func (rtspClient *RtspClient) SendMessage(request *rtsp.Request) (status int, response string, err error) {
+	if rtspClient.Auth != nil {
+		request.AddHeader("Authorization", rtspClient.Auth.GetString())
+	}
+
+	message := request.ToString()
+	_, err = rtspClient.TcpClient.SendString(message)
+	if err != nil {
+		return 0, "", err
+	}
+
+	status, response, err = rtspClient.ReadResponse()
+	if err != nil {
+		return status, "", err
+	}
+
+	if status == 401 && rtspClient.Auth != nil && rtspClient.Auth.Tried {
+		return status, response, errors.New("authorization failed")
+	}
+
+	if status == 401 && rtspClient.Auth == nil {
+		authExp := regexp.MustCompile("^[wW]{3}-[aA]uthenticate:\\s+(\\w+)\\s+realm=\"([^\"]+)\"\\s*,\\s*nonce=\"([^\"]+)\"\\s*.*$")
+
+		messageLines := strings.Split(response, "\r\n")
+
+		for _, line := range messageLines {
+			if authExp.MatchString(line) {
+				authInfo := authExp.FindStringSubmatch(line)
+				//authType := authInfo[1]
+				authRealm := authInfo[2]
+				authNonce := authInfo[3]
+				if rtspClient.Auth == nil {
+					rtspClient.Auth = &digest.Auth{
+						Username: rtspClient.Login,
+						Realm:    authRealm,
+						Password: rtspClient.Password,
+						Method:   request.Method,
+						Uri:      rtspClient.RemoteAddress,
+						Nonce:    authNonce,
+					}
+				} else {
+					rtspClient.Auth.Nonce = authNonce
+				}
+			}
+		}
+	}
+
+	if status == 401 && rtspClient.Auth != nil && !rtspClient.Auth.Tried {
+		//request.AddHeader("Authorization", rtspClient.Auth.GetString())
+		rtspClient.Auth.Tried = true
+
+		return rtspClient.SendMessage(request)
+	}
+
+	return status, response, err
+}
+
+func (rtspClient *RtspClient) ReadRequest() (message string, err error) {
 	contentLenExp := regexp.MustCompile("^[cC]ontent-[lL]ength:\\s*(\\d+)$")
 	endOfResponse := false
 	hasContent := false
 	var contentLen int
-
-	firstResponseLine, err := rtspClient.TcpClient.ReadLine()
-	if err != nil {
-		err = rtspClient.Disconnect()
-		if err != nil {
-			return "", err
-		}
-		return "", err
-	}
-
-	message += firstResponseLine + "\r\n"
 
 	for !endOfResponse {
 		responseLine, err := rtspClient.TcpClient.ReadLine()
@@ -472,6 +494,62 @@ func (rtspClient *RtspClient) ReadMessage() (message string, err error) {
 	logger.Junk(message)
 
 	return message, err
+}
+
+func (rtspClient *RtspClient) ReadResponse() (status int, message string, err error) {
+	contentLenExp := regexp.MustCompile("^[cC]ontent-[lL]ength:\\s*(\\d+)$")
+	endOfResponse := false
+	hasContent := false
+	var contentLen int
+
+	statusLineExp := regexp.MustCompile("^[rR][tT][sS][pP]/(\\d+.\\d+)\\s+(\\d+)\\s+(\\w+)$")
+
+	firstResponseLine, err := rtspClient.TcpClient.ReadLine()
+	if err != nil {
+		err = rtspClient.Disconnect()
+		if err != nil {
+			return 0, "", err
+		}
+		return 0, "", err
+	}
+
+	if !statusLineExp.MatchString(firstResponseLine) {
+		return 0, "", errors.New(fmt.Sprintf("RTSP client #%d: response does not have status line", rtspClient.SessionId))
+	}
+
+	statusLine := statusLineExp.FindStringSubmatch(firstResponseLine)
+	//rtspVersion := statusLine[1]
+	statusCode, _ := strconv.Atoi(statusLine[2])
+	//reason := statusLine[3]
+
+	message += firstResponseLine + "\r\n"
+
+	for !endOfResponse {
+		responseLine, err := rtspClient.TcpClient.ReadLine()
+		if err != nil {
+			return statusCode, "", nil
+		}
+
+		if responseLine == "" {
+			message += "\r\n"
+			if hasContent {
+				sdpContent, _, _ := rtspClient.TcpClient.ReadBytes(contentLen)
+				message += string(sdpContent)
+			}
+			endOfResponse = true
+		} else if contentLenExp.MatchString(responseLine) {
+			hasContent = true
+			contentLenString := contentLenExp.FindStringSubmatch(responseLine)[1]
+			contentLen, _ = strconv.Atoi(contentLenString)
+		}
+
+		message += responseLine + "\r\n"
+	}
+
+	logger.Junk(fmt.Sprintf("Rtsp rtspClient #%d: received message:", rtspClient.SessionId))
+	logger.Junk(message)
+
+	return statusCode, message, err
 }
 
 func parseSdp(client *RtspClient, message *string) {
@@ -589,7 +667,7 @@ func (rtspClient *RtspClient) run() {
 
 		if errorCount > maxErrorCount {
 			logger.Warning(fmt.Sprintf("RTSP rtspClient #%d: got %d errors while reading remote RTSP stream, rtspClient is disconnected", rtspClient.SessionId, errorCount))
-			rtspClient.Disconnect()
+			_ = rtspClient.Disconnect()
 		}
 	}
 }

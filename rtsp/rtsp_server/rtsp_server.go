@@ -93,7 +93,7 @@ func (rtspServer *RtspServer) Stop() error {
 
 	for _, client := range rtspServer.Clients {
 		if client.IsConnected {
-			_, _ = client.TearDown()
+			_, _, _ = client.TearDown()
 			_ = client.Disconnect()
 		}
 	}
@@ -134,7 +134,7 @@ func (rtspServer *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.T
 
 func (rtspServer *RtspServer) handleRtspClient(rtspClient *rtsp_client.RtspClient) {
 	for rtspClient.IsConnected && !rtspClient.IsPlaying {
-		request, err := rtspClient.ReadMessage()
+		request, err := rtspClient.ReadRequest()
 		if err != nil {
 			logger.Error(err.Error())
 		}

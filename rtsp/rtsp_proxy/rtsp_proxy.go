@@ -56,22 +56,22 @@ func (proxy *RtspProxy) ProxyFromRtspClient(client *rtsp_client.RtspClient, loca
 	go proxy.run()
 
 	if !client.IsPlaying {
-		_, err = client.Describe()
+		_, _, err = client.Describe()
 		if err != nil {
 			return err
 		}
 
-		_, err = client.Options()
+		_, _, err = client.Options()
 		if err != nil {
 			return err
 		}
 
-		_, err = client.Setup()
+		_, _, err = client.Setup()
 		if err != nil {
 			return err
 		}
 
-		_, err = client.Play()
+		_, _, err = client.Play()
 		if err != nil {
 			return err
 		}
@@ -106,7 +106,7 @@ func (proxy *RtspProxy) Stop() error {
 
 	if proxy.clientSelfHosted {
 		if client.IsConnected {
-			_, err := client.TearDown()
+			_, _, err := client.TearDown()
 			if err != nil {
 				return err
 			}

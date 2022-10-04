@@ -40,7 +40,10 @@ func Create() *WSServer {
 }
 
 func (server *WSServer) Start(path string, ip string, port int) error {
-	server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
+	if path != "" {
+		server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
+	}
+
 	server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
 
 	tcpServer := tcp_server.Create()

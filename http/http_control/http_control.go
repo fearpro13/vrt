@@ -102,7 +102,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 			jData, _ := json.Marshal(responseJson)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusServiceUnavailable)
-			writer.Write(jData)
+			_, _ = writer.Write(jData)
 			return
 		}
 
@@ -142,7 +142,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 			jData, _ := json.Marshal(responseJson)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusServiceUnavailable)
-			writer.Write(jData)
+			_, _ = writer.Write(jData)
 			return
 		}
 
@@ -157,7 +157,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		writer.WriteHeader(http.StatusOK)
-		writer.Write(jData)
+		_, _ = writer.Write(jData)
 	})
 
 	controlServer.WsServer.HttpHandler.HandleFunc("/add_broadcast", func(writer http.ResponseWriter, request *http.Request) {
@@ -193,7 +193,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 			jData, _ := json.Marshal(responseJson)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusServiceUnavailable)
-			writer.Write(jData)
+			_, _ = writer.Write(jData)
 			return
 		}
 
@@ -233,7 +233,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 			jData, _ := json.Marshal(responseJson)
 			writer.Header().Set("Content-Type", "application/json")
 			writer.WriteHeader(http.StatusServiceUnavailable)
-			writer.Write(jData)
+			_, _ = writer.Write(jData)
 			return
 		}
 
@@ -248,10 +248,13 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		writer.WriteHeader(http.StatusOK)
-		writer.Write(jData)
+		_, _ = writer.Write(jData)
 	})
 
-	controlServer.WsServer.Start("/", ip, port)
+	err := controlServer.WsServer.Start("", ip, port)
+	if err != nil {
+		logger.Error(err.Error())
+	}
 }
 
 func (controlServer *HttpControlServer) Stop() {
