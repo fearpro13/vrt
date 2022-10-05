@@ -15,7 +15,7 @@ import (
 
 // rtsp://stream:Tv4m6ag6@10.1.60.25
 // rtsp://stream:Tv4m6ag6@10.3.43.140:554
-// rtsp://stream:Tv4m6ag6@10.0.229.148 //sound
+// rtsp://stream:Tv4m6ag6@10.0.229.148 //sound+auth
 func main() {
 	rand.Seed(time.Now().UnixNano())
 

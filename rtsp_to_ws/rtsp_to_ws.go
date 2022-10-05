@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/deepch/vdk/av"
+	"github.com/deepch/vdk/codec/aacparser"
 	"github.com/deepch/vdk/codec/h264parser"
 	"github.com/deepch/vdk/format/mp4f"
 	"github.com/gorilla/websocket"
@@ -57,7 +58,7 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 		broadcast.Stop()
 	}
 
-	rtspClient.SubscribeToRtpBuff(broadcast.SessionId, func(bytesPtr *[]byte, num int) {
+	rtspClient.SubscribeToRtpBuff(broadcast.SessionId, func(bytesPtr *[]byte, channel int) {
 		bytes := *bytesPtr
 		if len(bytes) == 0 {
 			return
@@ -222,10 +223,9 @@ func RtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 		}
 	}
 	offset += 4
-	//videoId := 96
-	secondByte := 0 //int(content[1]) //226
-	switch secondByte {
-	case 0:
+	secondByte := content[1]
+	switch int(secondByte) {
+	case rtspClient.VideoId:
 		if rtspClient.PreVideoTimestamp == 0 {
 			rtspClient.PreVideoTimestamp = timestamp
 		}
@@ -345,6 +345,80 @@ func RtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 
 		if len(retmap) > 0 {
 			rtspClient.PreVideoTimestamp = timestamp
+			return retmap, true
+		}
+	case rtspClient.AudioId:
+		//if client.PreAudioTS == 0 {
+		//	client.PreAudioTS = timestamp
+		//}
+		nalRaw, _ := h264parser.SplitNALUs(content[offset:end])
+		var retmap []*av.Packet
+		for _, nal := range nalRaw {
+			var duration time.Duration
+			switch rtspClient.AudioCodec {
+			case av.PCM_MULAW:
+				duration = time.Duration(len(nal)) * time.Second / time.Duration(rtspClient.AudioTimeScale)
+				rtspClient.AudioTimeLine += duration
+				retmap = append(retmap, &av.Packet{
+					Data:            nal,
+					CompositionTime: time.Duration(1) * time.Millisecond,
+					Duration:        duration,
+					Idx:             rtspClient.AudioIDX,
+					IsKeyFrame:      false,
+					Time:            rtspClient.AudioTimeLine,
+				})
+			case av.PCM_ALAW:
+				duration = time.Duration(len(nal)) * time.Second / time.Duration(rtspClient.AudioTimeScale)
+				rtspClient.AudioTimeLine += duration
+				retmap = append(retmap, &av.Packet{
+					Data:            nal,
+					CompositionTime: time.Duration(1) * time.Millisecond,
+					Duration:        duration,
+					Idx:             rtspClient.AudioIDX,
+					IsKeyFrame:      false,
+					Time:            rtspClient.AudioTimeLine,
+				})
+			case av.OPUS:
+				duration = time.Duration(20) * time.Millisecond
+				rtspClient.AudioTimeLine += duration
+				retmap = append(retmap, &av.Packet{
+					Data:            nal,
+					CompositionTime: time.Duration(1) * time.Millisecond,
+					Duration:        duration,
+					Idx:             rtspClient.AudioIDX,
+					IsKeyFrame:      false,
+					Time:            rtspClient.AudioTimeLine,
+				})
+			case av.AAC:
+				auHeadersLength := uint16(0) | (uint16(nal[0]) << 8) | uint16(nal[1])
+				auHeadersCount := auHeadersLength >> 4
+				framesPayloadOffset := 2 + int(auHeadersCount)<<1
+				auHeaders := nal[2:framesPayloadOffset]
+				framesPayload := nal[framesPayloadOffset:]
+				for i := 0; i < int(auHeadersCount); i++ {
+					auHeader := uint16(0) | (uint16(auHeaders[0]) << 8) | uint16(auHeaders[1])
+					frameSize := auHeader >> 3
+					frame := framesPayload[:frameSize]
+					auHeaders = auHeaders[2:]
+					framesPayload = framesPayload[frameSize:]
+					if _, _, _, _, err := aacparser.ParseADTSHeader(frame); err == nil {
+						frame = frame[7:]
+					}
+					duration = time.Duration((float32(1024)/float32(rtspClient.AudioTimeScale))*1000*1000*1000) * time.Nanosecond
+					rtspClient.AudioTimeLine += duration
+					retmap = append(retmap, &av.Packet{
+						Data:            frame,
+						CompositionTime: time.Duration(1) * time.Millisecond,
+						Duration:        duration,
+						Idx:             rtspClient.AudioIDX,
+						IsKeyFrame:      false,
+						Time:            rtspClient.AudioTimeLine,
+					})
+				}
+			}
+		}
+		if len(retmap) > 0 {
+			//client.PreAudioTS = timestamp
 			return retmap, true
 		}
 	default:

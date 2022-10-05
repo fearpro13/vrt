@@ -8,31 +8,41 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 	"vrt/logger"
+	"vrt/rtsp"
 	"vrt/rtsp/rtsp_client"
 	"vrt/tcp/tcp_client"
 	"vrt/tcp/tcp_server"
 	"vrt/udp/udp_client"
-	"vrt/udp/udp_server"
 )
 
 type OnClientConnectCallback func(client *rtsp_client.RtspClient)
 
 type RtspServer struct {
-	SessionId     int32
-	Login         string
-	Password      string
-	Server        *tcp_server.TcpServer
-	Ip            string
-	Port          int
-	RtspAddress   string
-	StreamAddress string
-	RtpClient     *udp_client.UdpClient
-	RtpServer     *udp_server.UdpServer
-	RtpLocalPort  int
-	RtcpServer    *udp_server.UdpServer
-	RtcpLocalPort int
+	SessionId int32
+	Login     string
+	Password  string
+	Server    *tcp_server.TcpServer
+	Ip        string
+	Port      int
+
+	RtspAddress        string
+	VideoStreamAddress string
+	AudioStreamAddress string
+
+	VideoId int
+	AudioId int
+
+	SdpRaw string
+
+	RtpVideoClient *udp_client.UdpClient
+	RtpAudioClient *udp_client.UdpClient
+	//RtpServer      *udp_server.UdpServer
+
+	//RtpLocalPort  int
+	//RtcpServer    *udp_server.UdpServer
+	//RtcpLocalPort int
+
 	sync.Mutex
 	Clients                  map[int32]*rtsp_client.RtspClient
 	OnClientConnectListeners map[int32]OnClientConnectCallback
@@ -41,7 +51,13 @@ type RtspServer struct {
 
 func Create() *RtspServer {
 	id := rand.Int31()
-	server := &RtspServer{SessionId: id, Login: "user", Password: "qwerty"}
+	server := &RtspServer{
+		SessionId: id,
+		Login:     "user",
+		Password:  "qwerty",
+		VideoId:   0,
+		AudioId:   2,
+	}
 	server.Clients = map[int32]*rtsp_client.RtspClient{}
 
 	return server
@@ -61,22 +77,22 @@ func (rtspServer *RtspServer) Start(ip string, port int, rtpClientLocalPort int)
 
 	rtpClient := udp_client.Create()
 	rtpClient.LocalPort = rtpClientLocalPort
-	rtspServer.RtpClient = rtpClient
+	rtspServer.RtpVideoClient = rtpClient
 
-	randomPort := rand.Intn(64000) + 1024
+	//randomPort := rand.Intn(64000) + 1024
 
-	rtpServer := udp_server.Create()
-	err = rtpServer.Start(ip, randomPort)
-	rtspServer.RtpServer = rtpServer
+	//rtpServer := udp_server.Create()
+	//err = rtpServer.Start(ip, randomPort)
+	//rtspServer.RtpServer = rtpServer
 
-	rtcpServer := udp_server.Create()
-	err = rtcpServer.Start(ip, randomPort+1)
-	rtspServer.RtcpServer = rtcpServer
+	//rtcpServer := udp_server.Create()
+	//err = rtcpServer.Start(ip, randomPort+1)
+	//rtspServer.RtcpServer = rtcpServer
 
 	rtspAddress := fmt.Sprintf("rtsp://%s:%s@%s:%d", rtspServer.Login, rtspServer.Password, tcpServer.Ip, tcpServer.Port)
-	streamAddress := rtspAddress + "/" + "stream1"
 	rtspServer.RtspAddress = rtspAddress
-	rtspServer.StreamAddress = streamAddress
+	rtspServer.VideoStreamAddress = rtspAddress + "/" + "video1"
+	rtspServer.AudioStreamAddress = rtspAddress + "/" + "audio1"
 	rtspServer.IsRunning = true
 
 	logger.Info(fmt.Sprintf("RTSP rtspServer started at %s", rtspAddress))
@@ -93,7 +109,7 @@ func (rtspServer *RtspServer) Stop() error {
 
 	for _, client := range rtspServer.Clients {
 		if client.IsConnected {
-			_, _, _ = client.TearDown()
+			_, _ = client.TearDown()
 			_ = client.Disconnect()
 		}
 	}
@@ -103,8 +119,8 @@ func (rtspServer *RtspServer) Stop() error {
 		return err
 	}
 
-	if rtspServer.RtpClient.IsConnected {
-		err = rtspServer.RtpClient.Disconnect()
+	if rtspServer.RtpVideoClient.IsConnected {
+		err = rtspServer.RtpVideoClient.Disconnect()
 	}
 
 	logger.Info(fmt.Sprintf("RTSP rtspServer #%d stopped", rtspServer.SessionId))
@@ -133,162 +149,148 @@ func (rtspServer *RtspServer) connectRtspClient(connectedTcpClient *tcp_client.T
 }
 
 func (rtspServer *RtspServer) handleRtspClient(rtspClient *rtsp_client.RtspClient) {
+	rtspClient.RemoteAddress = rtspServer.RtspAddress
 	for rtspClient.IsConnected && !rtspClient.IsPlaying {
 		request, err := rtspClient.ReadRequest()
 		if err != nil {
 			logger.Error(err.Error())
+			rtspClient.TearDown()
+			rtspClient.Disconnect()
+			return
 		}
+
 		response, err := parseRequest(rtspServer, rtspClient, request)
 		if err != nil {
 			logger.Error(err.Error())
+			rtspClient.TearDown()
+			return
 		}
-		_, err = rtspClient.TcpClient.SendString(response)
+
+		_, err = rtspClient.TcpClient.SendString(response.ToString())
 		if err != nil {
 			logger.Error(err.Error())
+			rtspClient.TearDown()
+			return
 		}
 	}
 }
 
-func parseRequest(server *RtspServer, client *rtsp_client.RtspClient, request string) (response string, err error) {
-	requestLines := strings.Split(request, "\r\n")
-
-	methodExp, err := regexp.Compile("^\\w+")
-
+func parseRequest(server *RtspServer, client *rtsp_client.RtspClient, requestRaw string) (response *rtsp.Response, err error) {
+	request, err := rtsp.ParseRequest(requestRaw)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
-	method := strings.ToLower(methodExp.FindString(requestLines[0]))
+	method := request.Method
 
 	if method == "" {
-		return "", errors.New(fmt.Sprintf("rtsp server #%d: Некорректный метод запроса %s", server.SessionId, requestLines[0]))
+		return nil, errors.New(fmt.Sprintf("rtsp server #%d: RTSP client #%d - Некорректный метод запроса %s", server.SessionId, client.SessionId, method))
 	}
 
-	cseqExp := regexp.MustCompile("[cC][sS][eE][qQ]:\\s+(\\d+)")
-	if !cseqExp.MatchString(request) {
-		return "", errors.New(fmt.Sprintf("rtsp server #%d: Отсутствует заголовок Cseq", server.SessionId))
-	} else {
-		cseqString := cseqExp.FindStringSubmatch(request)[1]
-		client.CSeq, err = strconv.Atoi(cseqString)
-		if err != nil {
-			return "", err
+	cSeq, exist := request.GetHeader(rtsp.CSEQ)
+
+	if !exist {
+		return nil, errors.New(fmt.Sprintf("rtsp server #%d: RTSP client #%d - Отсутствует заголовок Cseq", server.SessionId, client.SessionId))
+	}
+
+	client.CSeq, _ = strconv.Atoi(cSeq)
+
+	response = rtsp.NewResponse(200, "OK")
+	response.AddHeader(rtsp.CSEQ, cSeq)
+	response.AddHeader("Content-Type", "application/sdp")
+	response.AddHeader("Content-Base", server.RtspAddress)
+	if method == rtsp.DESCRIBE {
+		response.AddBody(server.SdpRaw)
+	}
+
+	if method == rtsp.OPTIONS {
+		response.AddHeader("Public", "OPTIONS, DESCRIBE, PLAY, PAUSE, SETUP, TEARDOWN, SET_PARAMETER, GET_PARAMETER")
+	}
+
+	if method == rtsp.SETUP {
+		header, exist := request.GetHeader("Transport")
+		if !exist {
+			return nil, errors.New("request does not contain transport info")
 		}
-	}
 
-	now := time.Now()
-	nowFormatted := now.Format("Mon, Jan 02 2006 15:04:05 MST")
-
-	if method == "describe" {
-		response = ""
-		response += "RTSP/1.0 200 OK\r\n" +
-			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			"Content-Type: application/sdp\r\n" +
-			fmt.Sprintf("Content-Base: %s/\r\n", server.RtspAddress)
-
-		rtpInfo := fmt.Sprintf("v=0\r\n"+
-			"o=- 1663158230155577 1663158230155577 IN IP4 0.0.0.0\r\n"+
-			"s=Media Presentation\r\n"+
-			"e=NONE\r\n"+
-			"b=AS:5050\r\n"+
-			"t=0 0\r\n"+
-			"a=control:%s\r\n"+
-			"m=video 0 RTP/AVP 96\r\n"+
-			"c=IN IP4 0.0.0.0\r\n"+
-			"b=AS:5000\r\n"+
-			"a=recvonly\r\n"+
-			"a=x-dimensions:1280,720\r\n"+
-			"a=control:%s\r\n"+
-			"a=rtpmap:96 H264/90000\r\n"+
-			"a=fmtp:96 profile-level-id=420029; packetization-mode=1; sprop-parameter-sets=Z00AH5WoFAFuhAAAHCAABX5AEA==,aO48gA==\r\n"+
-			"a=Media_header:MEDIAINFO=494D4B48010200000400000100000000000000000000000000000000000000000000000000000000;\r\n"+
-			"a=appversion:1.0\r\n", server.RtspAddress, server.StreamAddress)
-
-		response += fmt.Sprintf("Content-Length: %d\r\n", len([]byte(rtpInfo))) +
-			"\r\n" +
-			rtpInfo
-	}
-
-	if method == "options" {
-		response = "RTSP/1.0 200 OK\r\n" +
-			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			"Public: OPTIONS, DESCRIBE, PLAY, PAUSE, SETUP, TEARDOWN, SET_PARAMETER, GET_PARAMETER\r\n" +
-			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
-			//"Content-Length: 0\r\n\r\n"
-			"\r\n"
-	}
-
-	if method == "setup" {
 		transportExp := regexp.MustCompile("[rR][tT][pP]/[aA][vV][pP]/(\\w+)")
 		var transport string
-		if !transportExp.MatchString(request) {
+		if !transportExp.MatchString(header) {
 			logger.Warning(fmt.Sprintf("RTSP client #%d: Could not detect transport protocol", client.SessionId))
 			logger.Warning(fmt.Sprintf("RTSP client #%d: Trying to use UDP as a transport protocol", client.SessionId))
 			transport = rtsp_client.RtspTransportUdp
 		} else {
-			transport = strings.ToLower(transportExp.FindStringSubmatch(request)[1])
+			transport = strings.ToLower(transportExp.FindStringSubmatch(header)[1])
 		}
 
-		transportInfo := ""
 		switch transport {
 		case rtsp_client.RtspTransportTcp:
 			client.Transport = rtsp_client.RtspTransportTcp
-			transportInfo = fmt.Sprintf("Transport: RTP/AVP/TCP;unicast;interleaved=0-1;ssrc=60d45a65;mode=\"play\"\r\n")
+
+			var interleaveChannelId int
+			switch request.Uri {
+			case server.VideoStreamAddress:
+				interleaveChannelId = server.VideoId
+			case server.AudioStreamAddress:
+				interleaveChannelId = server.AudioId
+			default:
+			}
+
+			response.AddHeader("Transport", fmt.Sprintf("RTP/AVP/TCP;unicast;interleaved=%d-%d;ssrc=60d45a65;mode=\"play\"", interleaveChannelId, interleaveChannelId+1))
 		case rtsp_client.RtspTransportUdp:
 			client.Transport = rtsp_client.RtspTransportUdp
 
 			transportPortExp, err := regexp.Compile("(\\d+)-(\\d+)")
 			if err != nil {
-				return "", err
+				return nil, err
 			}
-			if !transportPortExp.MatchString(request) {
-				return "", errors.New(fmt.Sprintf("RTSP server #%d: Tried to establish UDP connection, but client did not send port range", server.SessionId))
+			if !transportPortExp.MatchString(header) {
+				return nil, errors.New(fmt.Sprintf("RTSP server #%d: Tried to establish UDP connection, but client did not send port range", server.SessionId))
 			}
-			portMatches := transportPortExp.FindStringSubmatch(request)
+			portMatches := transportPortExp.FindStringSubmatch(header)
 			clientRtpPortLeftInt64, err := strconv.ParseInt(portMatches[1], 10, 64)
 			clientRtpPortRightInt64, err := strconv.ParseInt(portMatches[2], 10, 64)
 
 			clientRtpPortLeftInt := int(clientRtpPortLeftInt64)
 			clientRtpPortRightInt := int(clientRtpPortRightInt64)
 
-			err = client.RtpClient.Connect(client.TcpClient.Ip, clientRtpPortLeftInt)
-			serverRtpPort := client.RtpClient.LocalPort
+			var serverRtpPort int
+			switch request.Uri {
+			case server.VideoStreamAddress:
+				rtpVideoClient := udp_client.Create()
+				err = rtpVideoClient.Connect(client.TcpClient.Ip, clientRtpPortLeftInt)
+				client.RtpVideoClient = rtpVideoClient
 
-			transportInfo = fmt.Sprintf("Transport: RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"\r\n", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1)
+				serverRtpPort = rtpVideoClient.LocalPort
+			case server.AudioStreamAddress:
+				rtpAudioClient := udp_client.Create()
+				err = rtpAudioClient.Connect(client.TcpClient.Ip, clientRtpPortLeftInt)
+				client.RtpAudioClient = rtpAudioClient
+
+				serverRtpPort = client.RtpAudioClient.LocalPort
+			default:
+			}
+
+			response.AddHeader("Transport", fmt.Sprintf("RTP/AVP/UDP;unicast;client_port=%d-%d;server_port=%d-%d;ssrc=60d45a65;mode=\"play\"", clientRtpPortLeftInt, clientRtpPortRightInt, serverRtpPort, serverRtpPort+1))
 		default:
-			return "", errors.New(fmt.Sprintf("RTSP server #%d: transport %s is not supported", server.SessionId, transport))
+			return nil, errors.New(fmt.Sprintf("RTSP server #%d: transport %s is not supported", server.SessionId, transport))
 		}
 
 		logger.Info(fmt.Sprintf("RTSP client #%d: Selected %s as a transport protocol", client.SessionId, transport))
-
-		response = "RTSP/1.0 200 OK\r\n" +
-			transportInfo +
-			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			fmt.Sprintf("Session: %d;timeout=60\r\n", client.SessionId)
-
-		response += "Content-Length: 0\r\n\r\n"
+		response.AddHeader("Session", fmt.Sprintf("%d;timeout=60", client.SessionId))
 	}
 
-	if method == "play" {
-		response = "RTSP/1.0 200 OK\r\n" +
-			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			fmt.Sprintf("Session:%d\r\n", client.SessionId) +
-			fmt.Sprintf("RTP-Info: url=%s;seq=4563;rtptime=1435052840\r\n", server.StreamAddress) +
-			fmt.Sprintf("Date: %s\r\n", nowFormatted) +
-			"Content-Length: 0\r\n\r\n"
-
+	if method == rtsp.PLAY {
+		response.AddHeader("Session", fmt.Sprintf("%d", client.SessionId))
+		response.AddHeader("RTP-Info", fmt.Sprintf("url=%s;seq=4563;rtptime=1435052840", server.VideoStreamAddress))
 		client.IsPlaying = true
 		for _, listener := range client.OnStartPlayingListeners {
 			go listener(client)
 		}
 	}
 
-	if method == "teardown" {
-		response = "RTSP/1.0 200 OK\r\n" +
-			fmt.Sprintf("CSeq: %d\r\n", client.CSeq) +
-			fmt.Sprintf("Session:%d\r\n", client.SessionId) +
-			fmt.Sprintf("%s\r\n", nowFormatted) +
-			"Content-Length: 0\r\n\r\n"
-
+	if method == rtsp.TEARDOWN {
+		response.AddHeader("Session", fmt.Sprintf("%d", client.SessionId))
 		client.IsPlaying = false
 	}
 

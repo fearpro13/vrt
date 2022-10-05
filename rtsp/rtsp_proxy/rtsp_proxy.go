@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math/rand"
+	"regexp"
+	"strings"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_server"
@@ -43,39 +46,47 @@ func Create() *RtspProxy {
 }
 
 func (proxy *RtspProxy) ProxyFromRtspClient(client *rtsp_client.RtspClient, localRtspPort int) error {
+	if !client.IsConnected {
+		return errors.New("rtsp proxy #%d: RTSP клиент должен быть подключен перед запуском прокирования")
+	}
+
 	err := proxy.RtspServer.Start("", localRtspPort, 0)
 	if err != nil {
 		return err
 	}
 
-	if !client.IsConnected {
-		return errors.New("rtsp proxy #%d: RTSP клиент должен быть подключен перед запуском прокирования")
+	if !client.IsPlaying {
+		_, err := client.Describe()
+		if err != nil {
+			return err
+		}
+
+		proxy.RtspServer.SdpRaw, err = interceptSDP(client, proxy.RtspServer)
+		if err != nil {
+			return err
+		}
+
+		_, err = client.Options()
+		if err != nil {
+			return err
+		}
+
+		_, err = client.Setup()
+		if err != nil {
+			return err
+		}
+
+		response, err := client.Play()
+		if err != nil {
+			return err
+		}
+		if response.Status != 200 {
+			return errors.New(fmt.Sprintf("RTSP proxy #%d: Could not play media from #%d RTSP client", proxy.SessionId, client.SessionId))
+		}
 	}
 
 	proxy.IsRunning = true
 	go proxy.run()
-
-	if !client.IsPlaying {
-		_, _, err = client.Describe()
-		if err != nil {
-			return err
-		}
-
-		_, _, err = client.Options()
-		if err != nil {
-			return err
-		}
-
-		_, _, err = client.Setup()
-		if err != nil {
-			return err
-		}
-
-		_, _, err = client.Play()
-		if err != nil {
-			return err
-		}
-	}
 
 	return err
 }
@@ -106,7 +117,7 @@ func (proxy *RtspProxy) Stop() error {
 
 	if proxy.clientSelfHosted {
 		if client.IsConnected {
-			_, _, err := client.TearDown()
+			_, err := client.TearDown()
 			if err != nil {
 				return err
 			}
@@ -135,7 +146,7 @@ func (proxy *RtspProxy) run() {
 		_ = proxy.Stop()
 	}
 
-	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytesPtr *[]byte, num int) {
+	rtspClient.SubscribeToRtpBuff(proxy.SessionId, func(bytesPtr *[]byte, channel int) {
 		rtpBytes := *bytesPtr
 
 		if len(rtpBytes) == 0 {
@@ -147,17 +158,23 @@ func (proxy *RtspProxy) run() {
 				continue
 			}
 
-			sendToRtspClient(client, *bytesPtr)
+			sendToRtspClient(client, *bytesPtr, channel == rtspClient.AudioId)
 		}
 	})
 }
 
-func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
+func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte, audio bool) {
 	cpyBuff := make([]byte, len(payload))
 	copy(cpyBuff, payload)
 
 	if client.Transport == rtsp_client.RtspTransportTcp {
 		if cpyBuff[0] == 0x24 {
+			if audio {
+				cpyBuff[1] = uint8(client.AudioId)
+			} else {
+				cpyBuff[1] = uint8(client.VideoId)
+			}
+
 			_, err := client.TcpClient.Send(cpyBuff)
 			if err != nil {
 				logger.Error(err.Error())
@@ -170,7 +187,11 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
 			buff := make([]byte, len(cpyBuff)+4)
 			header := make([]byte, 4)
 			header[0] = 0x24
-			header[1] = 0
+			if audio {
+				header[1] = uint8(client.AudioId)
+			} else {
+				header[1] = uint8(client.VideoId)
+			}
 			binary.BigEndian.PutUint16(header[2:4], uint16(len(cpyBuff)))
 			copy(buff, header)
 			copy(buff[4:], cpyBuff)
@@ -187,12 +208,18 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
 	}
 
 	if client.Transport == rtsp_client.RtspTransportUdp {
-		if !client.RtpClient.IsConnected {
+		if !client.RtpVideoClient.IsConnected {
 			return
 		}
 
 		if cpyBuff[0] == 0x24 {
-			err := client.RtpClient.Send(cpyBuff[4:])
+			var err error
+			if audio {
+				err = client.RtpAudioClient.Send(cpyBuff[4:])
+			} else {
+				err = client.RtpVideoClient.Send(cpyBuff[4:])
+			}
+
 			if err != nil {
 				logger.Error(err.Error())
 				err = client.Disconnect()
@@ -201,7 +228,13 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
 				}
 			}
 		} else {
-			err := client.RtpClient.Send(cpyBuff)
+			var err error
+			if audio {
+				err = client.RtpAudioClient.Send(cpyBuff[4:])
+			} else {
+				err = client.RtpVideoClient.Send(cpyBuff[4:])
+			}
+
 			if err != nil {
 				logger.Error(err.Error())
 				err = client.Disconnect()
@@ -211,4 +244,30 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte) {
 			}
 		}
 	}
+}
+
+func interceptSDP(client *rtsp_client.RtspClient, server *rtsp_server.RtspServer) (sdp string, err error) {
+	sdp = client.SdpRaw
+	controlExp := regexp.MustCompile("^a=control:.*$")
+	sdpLines := strings.Split(sdp, "\r\n")
+
+	tracksFound := 0
+	for index, line := range sdpLines {
+		if controlExp.MatchString(line) {
+			tracksFound++
+			switch tracksFound {
+			case 1:
+				sdpLines[index] = fmt.Sprintf("a=control:%s", server.RtspAddress)
+			case 2:
+				sdpLines[index] = fmt.Sprintf("a=control:%s", server.VideoStreamAddress)
+			case 3:
+				sdpLines[index] = fmt.Sprintf("a=control:%s", server.AudioStreamAddress)
+			default:
+				return "", errors.New("RTSP client contains > 2 media tracks. server media tracks number is 2")
+			}
+
+		}
+	}
+
+	return strings.Join(sdpLines, "\r\n"), nil
 }
