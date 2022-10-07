@@ -30,8 +30,8 @@ func Create() *TcpClient {
 	id := rand.Int31()
 	client := &TcpClient{
 		SessionId:             id,
-		WriteTimeout:          1 * time.Second,
-		ReadTimeout:           1 * time.Second,
+		WriteTimeout:          5 * time.Second,
+		ReadTimeout:           5 * time.Second,
 		OnDisconnectListeners: map[int32]onDisconnectCallback{},
 	}
 

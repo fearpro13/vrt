@@ -1,6 +1,7 @@
 package rtmp_client
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -128,22 +129,33 @@ func (rtmpClient *RtmpClient) BeginHandshake() error {
 	tcpClient.IO.Write(c0)
 	tcpClient.IO.Flush()
 
+	s1 := make([]byte, 1536)
+	s1Time := uint32(time.Now().Unix())
+	binary.BigEndian.PutUint32(s1[:4], s1Time)
+	binary.BigEndian.PutUint32(s1[4:8], 0)
+	rand.Read(s1[8:])
+	s1Rand := s1[8:]
+	tcpClient.Socket.SetWriteDeadline(time.Now().Add(tcpClient.WriteTimeout))
+	tcpClient.IO.Write(s1)
+	tcpClient.IO.Flush()
+
 	c1 := make([]byte, 1536)
 	tcpClient.Socket.SetReadDeadline(time.Now().Add(tcpClient.ReadTimeout))
 	tcpClient.IO.Read(c1)
-	hTime := binary.BigEndian.Uint32(c1[:4])
+	timeC1 := binary.BigEndian.Uint32(c1[:4])
 	zero := binary.BigEndian.Uint32(c1[4:8])
-	logger.Junk(fmt.Sprintf("RTMP client #%d: Handshake c1 received, time %d ", rtmpClient.SessionId, hTime))
+	c1Rand := c1[8:]
+	logger.Junk(fmt.Sprintf("RTMP client #%d: Handshake c1 received, time %d ", rtmpClient.SessionId, timeC1))
 	if zero != 0 {
 		return errors.New(fmt.Sprintf("RTMP client #%d: Handshake c1 received, zero header is not zero", rtmpClient.SessionId))
 	}
 
-	s1 := make([]byte, 1536)
-	binary.BigEndian.PutUint32(s1[:4], hTime)
-	binary.BigEndian.PutUint32(s1[4:8], 0)
-	rand.Read(s1[8:])
+	s2 := make([]byte, 1536)
+	binary.BigEndian.PutUint32(s2[:4], timeC1)
+	binary.BigEndian.PutUint32(s2[4:8], 0)
+	copy(s2[8:], c1Rand)
 	tcpClient.Socket.SetWriteDeadline(time.Now().Add(tcpClient.WriteTimeout))
-	tcpClient.IO.Write(s1)
+	tcpClient.IO.Write(s2)
 	tcpClient.IO.Flush()
 
 	c2 := make([]byte, 1536)
@@ -151,23 +163,13 @@ func (rtmpClient *RtmpClient) BeginHandshake() error {
 	tcpClient.IO.Read(c2)
 	hTime1 := binary.BigEndian.Uint32(c2[:4])
 	hTime2 := binary.BigEndian.Uint32(c2[4:8])
+	c2Rand := c2[8:]
 
 	logger.Junk(fmt.Sprintf("RTMP client #%d: Handshake c2 received, time1 %d ", rtmpClient.SessionId, hTime1))
-	if hTime1 != hTime {
-		return errors.New(fmt.Sprintf("RTMP client #%d: Handshake c2 received, but c2 time(%d) is not equal to time in s1(%d)", rtmpClient.SessionId, hTime1, hTime))
+	if !bytes.Equal(s1Rand, c2Rand) {
+		return errors.New(fmt.Sprintf("RTMP client #%d: Handshake failed, random data is not equal", rtmpClient.SessionId))
 	}
 	logger.Junk(fmt.Sprintf("RTMP client #%d: Handshake c2 received, time2 %d ", rtmpClient.SessionId, hTime2))
-	//if hTime2 != hTime {
-	//	return errors.New(fmt.Sprintf("RTMP client #%d: Handshake c2 received, but c2 time2(%d) is not equal to time in s1(%d)", rtmpClient.SessionId, hTime2, hTime))
-	//}
-
-	s2 := make([]byte, 1536)
-	binary.BigEndian.PutUint32(s2[:4], hTime)
-	binary.BigEndian.PutUint32(s2[4:8], hTime)
-	copy(s2[8:], s1[8:])
-	tcpClient.Socket.SetWriteDeadline(time.Now().Add(tcpClient.WriteTimeout))
-	tcpClient.IO.Write(s2)
-	tcpClient.IO.Flush()
 
 	return nil
 }
@@ -383,15 +385,41 @@ func (rtmpClient *RtmpClient) run() {
 				logger.Junk(fmt.Sprintf("RTMP client #%d: Received message type %d(%s)",
 					rtmpClient.SessionId, messageTypeId, "Command message"))
 
-				parsedMessage, err := AMF0.Parse(messageBody)
+				parsedAMF, err := AMF0.Parse(messageBody)
 				if err != nil {
 					logger.Error(err.Error())
-					logger.Junk(fmt.Sprintf("AMF0: parsed %d entries", len(parsedMessage.Objects)))
+					logger.Junk(fmt.Sprintf("AMF0: parsed %d entries", len(parsedAMF.Objects)))
 				}
 
-				buff := make([]byte, 4)
-				binary.BigEndian.PutUint32(buff[0:4], uint32(250000))
-				rtmpClient.SendMessage(chunkStreamId, 0, 0, 14, messageStreamId, buff)
+				amf := AMF0.NewAMF0()
+				amf.PutString("_result")
+				amf.PutNumber(1)
+
+				obj1 := AMF0.NewObject()
+				obj1.PutString("fmsVer", "FMS/3,5,7,7009")
+				obj1.PutNumber("capabilities", 31)
+				obj1.PutNumber("mode", 1)
+
+				amf.PutObject(obj1)
+
+				ecmaArray := AMF0.NewObject()
+				ecmaArray.PutString("version", "3,5,7,7009")
+
+				obj2 := AMF0.NewObject()
+				obj2.PutString("level", "status")
+				obj2.PutString("code", "NetConnection.Connect.Success")
+				obj2.PutString("description", "Connection succeeded.")
+				obj2.PutEcmaArray("data", ecmaArray)
+				obj2.PutNumber("clientid", 1384430002)
+				obj2.PutNumber("objectEncoding", 0)
+
+				amf.PutObject(obj2)
+				amfBytes, err := amf.Build()
+				if err != nil {
+					logger.Error(err.Error())
+					logger.Junk(fmt.Sprintf("AMF0: parse error: %s", err.Error()))
+				}
+				rtmpClient.SendMessage(chunkStreamId, 0, 0, 20, messageStreamId, amfBytes)
 
 			case 18, 15: //data message
 				logger.Junk(fmt.Sprintf("RTMP client #%d: Received message type %d(%s)",
