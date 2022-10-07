@@ -59,6 +59,10 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 	}
 
 	rtspClient.SubscribeToRtpBuff(broadcast.SessionId, func(bytesPtr *[]byte, channel int) {
+		if channel == rtspClient.AudioId && rtspClient.AudioCodec != av.AAC {
+			return
+		}
+
 		bytes := *bytesPtr
 		if len(bytes) == 0 {
 			return
@@ -92,18 +96,32 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 		}
 	})
 
+	clientCodecs := broadcast.RtspClient.Codecs
+
+	codecs := []av.CodecData{}
+	for _, codec := range clientCodecs {
+		if codec.Type().IsAudio() && codec.Type().String() != "aac" {
+			logger.Warning(fmt.Sprintf("Audio codec %s is not supported for fragmentedMP4 stream. Only AAC codec is supported. Audio for stream will be omitted", codec.Type().String()))
+			continue
+		} else {
+			codecs = append(codecs, codec)
+		}
+	}
+
 	wsServer.OnConnectListeners[broadcast.SessionId] = func(client *ws_client.WSClient, relativeURLPath string) {
 		if relativeURLPath != broadcast.Path {
 			return
 		}
 
 		muxer := mp4f.NewMuxer(nil)
-		codecs := broadcast.RtspClient.Codecs
+
 		err := muxer.WriteHeader(codecs)
 		if err != nil {
+
 			logger.Error(err.Error())
 			return
 		}
+
 		meta, init := muxer.GetInit(codecs)
 
 		err = client.Send(websocket.BinaryMessage, append([]byte{9}, meta...))

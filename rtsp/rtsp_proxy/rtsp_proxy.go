@@ -230,9 +230,9 @@ func sendToRtspClient(client *rtsp_client.RtspClient, payload []byte, audio bool
 		} else {
 			var err error
 			if audio {
-				err = client.RtpAudioClient.Send(cpyBuff[4:])
+				err = client.RtpAudioClient.Send(cpyBuff)
 			} else {
-				err = client.RtpVideoClient.Send(cpyBuff[4:])
+				err = client.RtpVideoClient.Send(cpyBuff)
 			}
 
 			if err != nil {

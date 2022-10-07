@@ -326,22 +326,25 @@ func (rtspClient *RtspClient) Setup() (response *rtsp.Response, err error) {
 
 	if rtspClient.Transport == RtspTransportUdp {
 		for _, media := range rtspClient.Sdp {
-			request := rtsp.NewRequest(rtsp.SETUP, rtspClient.VideoStreamAddress)
-			request.AddHeader(rtsp.CSEQ, strconv.Itoa(rtspClient.CSeq))
-			request.AddHeader("Accept", "application/sdp")
 			randPortInt := rand.Intn(64000) + 1024
 
 			rtpServer := udp_server.Create()
 			rtpServer.Port = randPortInt
 
+			var request *rtsp.Request
 			switch media.AVType {
 			case VIDEO:
+				request = rtsp.NewRequest(rtsp.SETUP, rtspClient.VideoStreamAddress)
 				rtspClient.RtpVideoServer = rtpServer
 			case AUDIO:
+				request = rtsp.NewRequest(rtsp.SETUP, rtspClient.AudioStreamAddress)
 				rtspClient.RtpAudioServer = rtpServer
 			default:
 				return nil, errors.New(fmt.Sprintf("Unsupported media type %s", media.AVType))
 			}
+
+			request.AddHeader(rtsp.CSEQ, strconv.Itoa(rtspClient.CSeq))
+			request.AddHeader("Accept", "application/sdp")
 
 			request.AddHeader("Transport", fmt.Sprintf("RTP/AVP/UDP;unicast;client_port=%d-%d", randPortInt, randPortInt+1))
 
@@ -632,12 +635,21 @@ func (rtspClient *RtspClient) ReadResponse() (response *rtsp.Response, err error
 func parseSdp(client *RtspClient, message *string) (err error) {
 	_, client.Sdp = sdp.Parse(*message)
 
+	rtspExp := regexp.MustCompile("^[rRtTsSpP]+://")
+
 	for _, mediaType := range client.Sdp {
+		var control string
+		if rtspExp.MatchString(mediaType.Control) {
+			control = mediaType.Control
+		} else {
+			control = client.RemoteAddress + "/" + mediaType.Control
+		}
 		switch mediaType.AVType {
 		case VIDEO:
-			client.VideoStreamAddress = mediaType.Control
+
+			client.VideoStreamAddress = control
 		case AUDIO:
-			client.AudioStreamAddress = mediaType.Control
+			client.AudioStreamAddress = control
 		default:
 			return errors.New(fmt.Sprintf("Unsupported mediatype %s", mediaType.Type))
 		}
@@ -769,11 +781,10 @@ func (rtspClient *RtspClient) run() {
 						errorCount++
 					}
 
-					/////VERY IMPORTANT NOTICE!!!
-					///VIDEO AND AUDIO TRACK CHANNEL IDENTIFIERS ARE NOT CONSTANT!!!!
-					////IDENTIFIERS COME FROM SDP ON SETUP STEP
-					/////NORMALLY THEY ARE THE FIRST AVAILABLE NUMBERS 0 - video, 1 - audio
-					////BUT UNDER ANY CIRCUMSTANCES THAT MAY CHANGE
+					if len(rtspClient.RtpSubscribers) == 0 {
+						continue
+					}
+
 					switch int(rtpPacket[1]) {
 					case rtspClient.VideoId:
 						rtspClient.RTPVideoChan <- rtpPacket
@@ -784,12 +795,29 @@ func (rtspClient *RtspClient) run() {
 					logger.Warning(fmt.Sprintf("RTSP Interleaved frame error, header: %d %d %d %d", header[0], header[1], header[2], header[3]))
 				}
 			}
+		}
 
-			if rtspClient.Transport == RtspTransportUdp {
-				select {
-				case buff := <-rtspClient.RtpVideoServer.RecvBuff:
+		if rtspClient.Transport == RtspTransportUdp {
+			var vChan, aChan chan []byte
+
+			if rtspClient.RtpVideoServer != nil {
+				vChan = rtspClient.RtpVideoServer.RecvBuff
+			} else {
+				vChan = nil
+			}
+
+			if rtspClient.RtpAudioServer != nil {
+				aChan = rtspClient.RtpAudioServer.RecvBuff
+			} else {
+				aChan = nil
+			}
+			select {
+			case buff := <-vChan:
+				if len(rtspClient.RtpSubscribers) > 0 {
 					rtspClient.RTPVideoChan <- buff
-				case buff := <-rtspClient.RtpAudioServer.RecvBuff:
+				}
+			case buff := <-aChan:
+				if len(rtspClient.RtpSubscribers) > 0 {
 					rtspClient.RTPAudioChan <- buff
 				}
 			}

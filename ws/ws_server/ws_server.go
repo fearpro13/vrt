@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"github.com/gorilla/websocket"
 	"math/rand"
+	"net"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"vrt/logger"
-	"vrt/tcp/tcp_server"
 	"vrt/ws/ws_client"
 )
 
@@ -22,7 +24,7 @@ type WSServer struct {
 	OnConnectListeners map[int32]ws_client.WSClientCallback
 	HttpServer         *http.Server
 	HttpHandler        *http.ServeMux
-	HttpTcpServer      *tcp_server.TcpServer
+	HttpTcpHandler     *net.TCPListener
 }
 
 func Create() *WSServer {
@@ -44,20 +46,31 @@ func (server *WSServer) Start(path string, ip string, port int) error {
 		server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
 	}
 
-	server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
+	ipPtr := net.TCPAddr{IP: net.ParseIP(ip), Port: port}
+	socket, err := net.ListenTCP("tcp4", &ipPtr)
 
-	tcpServer := tcp_server.Create()
-	err := tcpServer.Start("", port)
 	if err != nil {
 		return err
 	}
-	server.HttpTcpServer = tcpServer
 
-	go server.HttpServer.Serve(tcpServer.Socket)
+	tcpAddress := socket.Addr().String()
+	tcpAddressArray := strings.Split(tcpAddress, ":")
+	assignedIpString := tcpAddressArray[0]
+	assignedPortString := tcpAddressArray[1]
+	assignedPortInt64, err := strconv.ParseInt(assignedPortString, 10, 64)
+	assignedPortInt := int(assignedPortInt64)
+
+	server.Ip = assignedIpString
+	server.Port = assignedPortInt
+
+	server.HttpTcpHandler = socket
+
+	//server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
+	go server.HttpServer.Serve(socket)
 
 	server.IsRunning = true
 
-	logger.Info(fmt.Sprintf("WS server #%d started on %s:%d", server.SessionId, tcpServer.Ip, tcpServer.Port))
+	logger.Info(fmt.Sprintf("WS server #%d started on %s:%d", server.SessionId, server.Ip, server.Port))
 
 	return nil
 }
