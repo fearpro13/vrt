@@ -32,7 +32,9 @@
         let config = {
             method:'POST',
             body:JSON.stringify({
-                'remote_address':address
+                'remote_address':address,
+                'lifetime':60,
+                'active_time':10
             })
         }
         fetch(uri,config)

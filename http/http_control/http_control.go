@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"sync"
+	"time"
 	"vrt/logger"
 	"vrt/rtsp/rtsp_client"
 	"vrt/rtsp/rtsp_proxy"
@@ -21,6 +23,16 @@ type HttpControlServer struct {
 	Signals                  chan os.Signal
 	proxyByRemoteAddress     map[string]*rtsp_proxy.RtspProxy
 	broadcastByRemoteAddress map[string]*rtsp_to_ws.Broadcast
+	sync.Mutex
+	BroadcastTimers map[int32]*BroadcastTimer
+	IsRunning       bool
+}
+
+type BroadcastTimer struct {
+	Broadcast      *rtsp_to_ws.Broadcast
+	ActiveTime     int
+	LastActiveTime int64
+	LifeTimeEnd    int64
 }
 
 type AddProxyJson struct {
@@ -40,6 +52,8 @@ type ProxyJson struct {
 }
 
 type AddWsBroadcastJson struct {
+	LifeTime      int    `json:"lifetime"`
+	ActiveTime    int    `json:"active_time"`
 	RemoteAddress string `json:"remote_address"`
 }
 
@@ -63,12 +77,35 @@ func NewHttpControlServer() *HttpControlServer {
 		WsServer:                 ws_server.Create(),
 		routes:                   []string{},
 		Signals:                  make(chan os.Signal, 1),
+		BroadcastTimers:          map[int32]*BroadcastTimer{},
 	}
 
 	return controlServer
 }
 
 func (controlServer *HttpControlServer) Start(ip string, port int) {
+	controlServer.IsRunning = true
+
+	go func() {
+		for controlServer.IsRunning {
+			cTime := time.Now().Unix()
+			for broadcastId, broadcastTimer := range controlServer.BroadcastTimers {
+				if broadcastTimer.LifeTimeEnd != 0 && broadcastTimer.LifeTimeEnd < cTime {
+					controlServer.StopWsBroadcast(broadcastId)
+					continue
+				}
+				if broadcastTimer.ActiveTime != 0 && len(broadcastTimer.Broadcast.Clients) == 0 {
+					if cTime-broadcastTimer.LastActiveTime > int64(broadcastTimer.ActiveTime) {
+						controlServer.StopWsBroadcast(broadcastId)
+					}
+				} else {
+					broadcastTimer.LastActiveTime = cTime
+				}
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
 	controlServer.WsServer.HttpHandler.HandleFunc("/add_proxy", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 
@@ -186,7 +223,7 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 			return
 		}
 
-		err = controlServer.AddWsBroadcast(broadcastJson.RemoteAddress)
+		err = controlServer.AddWsBroadcast(broadcastJson.RemoteAddress, broadcastJson.LifeTime, broadcastJson.ActiveTime)
 
 		if err != nil {
 			responseJson := []string{err.Error()}
@@ -307,7 +344,7 @@ func (controlServer *HttpControlServer) ProxyList() []*ProxyJson {
 	return proxies
 }
 
-func (controlServer *HttpControlServer) AddWsBroadcast(remoteRtspAddress string) error {
+func (controlServer *HttpControlServer) AddWsBroadcast(remoteRtspAddress string, lifeTime int, activeTime int) error {
 	broadcast := rtsp_to_ws.NewBroadcast()
 
 	var rtspClient *rtsp_client.RtspClient
@@ -328,12 +365,35 @@ func (controlServer *HttpControlServer) AddWsBroadcast(remoteRtspAddress string)
 
 	broadcast.BroadcastRtspClientToWebsockets(fmt.Sprintf("/ws_stream/%d", broadcast.SessionId), rtspClient, controlServer.WsServer)
 
+	var lifeTimeEnd int64 = 0
+	if lifeTime > 0 {
+		lifeTimeEnd = time.Now().Add(time.Duration(lifeTime) * time.Second).Unix()
+	}
+
+	var lastActiveTime int64 = 0
+	if activeTime > 0 {
+		lastActiveTime = time.Now().Add(time.Duration(activeTime) * time.Second).Unix()
+	}
+
+	broadcastTimer := &BroadcastTimer{
+		Broadcast:      broadcast,
+		ActiveTime:     activeTime,
+		LastActiveTime: lastActiveTime,
+		LifeTimeEnd:    lifeTimeEnd,
+	}
+
+	controlServer.Lock()
 	controlServer.WsBroadcasts[broadcast.SessionId] = broadcast
 	controlServer.broadcastByRemoteAddress[remoteRtspAddress] = broadcast
+	controlServer.BroadcastTimers[broadcast.SessionId] = broadcastTimer
+	controlServer.Unlock()
 
 	broadcast.OnStopListeners[0] = func(broadcast *rtsp_to_ws.Broadcast) {
+		controlServer.Lock()
 		delete(controlServer.WsBroadcasts, broadcast.SessionId)
 		delete(controlServer.broadcastByRemoteAddress, remoteRtspAddress)
+		delete(controlServer.BroadcastTimers, broadcast.SessionId)
+		controlServer.Unlock()
 	}
 
 	return nil
@@ -361,8 +421,12 @@ func (controlServer *HttpControlServer) StopWsBroadcast(broadcastId int32) error
 		return errors.New("broadcast does not exist")
 	}
 	broadcast.Stop()
+
+	controlServer.Lock()
 	delete(controlServer.WsBroadcasts, broadcastId)
 	delete(controlServer.proxyByRemoteAddress, broadcast.RtspClient.RemoteAddress)
+	delete(controlServer.BroadcastTimers, broadcastId)
+	controlServer.Unlock()
 
 	return nil
 }
