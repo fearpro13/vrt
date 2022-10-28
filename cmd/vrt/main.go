@@ -35,6 +35,9 @@ func main() {
 	command.RegisterFlag("http", "h", "Enables http control mode", true, false)
 	command.RegisterOption("h:port", "h:p", "Http control server port", true, "0")
 
+	command.RegisterOption("cert", "c", "Https certificate path", true, "")
+	command.RegisterOption("key", "k", "Https private key path", true, "")
+
 	if len(os.Args) == 2 && os.Args[1] == "--help" {
 		fmt.Println(command.PrintHelp())
 		os.Exit(0)
@@ -89,6 +92,10 @@ func main() {
 	}
 
 	websocketMode := command.GetFlag("websocket").Value
+
+	httpsCertPath := command.GetOption("cert").Value
+	httpsPrivateKeyPath := command.GetOption("key").Value
+
 	var wsBroadcast *rtsp_to_ws.Broadcast
 	if websocketMode {
 		logger.Info("Program uses websocket mode")
@@ -101,7 +108,7 @@ func main() {
 		}
 
 		wsServer := ws_server.Create()
-		err = wsServer.Start("/", "", wsServerPortInt)
+		err = wsServer.Start("/", "", wsServerPortInt, httpsCertPath, httpsPrivateKeyPath)
 		if err != nil {
 			logger.Error(err.Error())
 			os.Exit(1)
@@ -132,7 +139,11 @@ func main() {
 			os.Exit(1)
 		}
 		controlServer := http_control.NewHttpControlServer()
-		controlServer.Start("", controlServerPort)
+		err = controlServer.Start("", controlServerPort, httpsCertPath, httpsPrivateKeyPath)
+		if err != nil {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
 	}
 
 	if !websocketMode && !proxyMode && !httpControlMode {

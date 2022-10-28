@@ -66,6 +66,7 @@ type BroadcastJson struct {
 	RemoteAddress string `json:"remote_address"`
 	LocalAddress  string `json:"local_address"`
 	Clients       int    `json:"clients"`
+	Uptime        int64  `json:"uptime"`
 }
 
 func NewHttpControlServer() *HttpControlServer {
@@ -83,28 +84,7 @@ func NewHttpControlServer() *HttpControlServer {
 	return controlServer
 }
 
-func (controlServer *HttpControlServer) Start(ip string, port int) {
-	controlServer.IsRunning = true
-
-	go func() {
-		for controlServer.IsRunning {
-			cTime := time.Now().Unix()
-			for broadcastId, broadcastTimer := range controlServer.BroadcastTimers {
-				if broadcastTimer.LifeTimeEnd != 0 && broadcastTimer.LifeTimeEnd < cTime {
-					controlServer.StopWsBroadcast(broadcastId)
-					continue
-				}
-				if broadcastTimer.ActiveTime != 0 && len(broadcastTimer.Broadcast.Clients) == 0 {
-					if cTime-broadcastTimer.LastActiveTime > int64(broadcastTimer.ActiveTime) {
-						controlServer.StopWsBroadcast(broadcastId)
-					}
-				} else {
-					broadcastTimer.LastActiveTime = cTime
-				}
-			}
-			time.Sleep(5 * time.Second)
-		}
-	}()
+func (controlServer *HttpControlServer) Start(ip string, port int, certPath string, privateKeyPath string) error {
 
 	controlServer.WsServer.HttpHandler.HandleFunc("/add_proxy", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
@@ -288,10 +268,36 @@ func (controlServer *HttpControlServer) Start(ip string, port int) {
 		_, _ = writer.Write(jData)
 	})
 
-	err := controlServer.WsServer.Start("", ip, port)
+	err := controlServer.WsServer.Start("", ip, port, certPath, privateKeyPath)
 	if err != nil {
-		logger.Error(err.Error())
+		return err
 	}
+
+	controlServer.IsRunning = true
+
+	go func() {
+		for controlServer.IsRunning {
+			cTime := time.Now().Unix()
+			for broadcastId, broadcastTimer := range controlServer.BroadcastTimers {
+				if broadcastTimer.LifeTimeEnd != 0 && broadcastTimer.LifeTimeEnd < cTime {
+					logger.Info(fmt.Sprintf("WS broadcast #%d: Stream lifetime reached, stopping stream", broadcastId))
+					controlServer.StopWsBroadcast(broadcastId)
+					continue
+				}
+				if broadcastTimer.ActiveTime != 0 && len(broadcastTimer.Broadcast.Clients) == 0 {
+					if cTime-broadcastTimer.LastActiveTime > int64(broadcastTimer.ActiveTime) {
+						logger.Info(fmt.Sprintf("WS broadcast #%d: There are no users within specified timeout, stopping stream", broadcastId))
+						controlServer.StopWsBroadcast(broadcastId)
+					}
+				} else {
+					broadcastTimer.LastActiveTime = cTime
+				}
+			}
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
+	return nil
 }
 
 func (controlServer *HttpControlServer) Stop() {
@@ -368,11 +374,13 @@ func (controlServer *HttpControlServer) AddWsBroadcast(remoteRtspAddress string,
 	var lifeTimeEnd int64 = 0
 	if lifeTime > 0 {
 		lifeTimeEnd = time.Now().Add(time.Duration(lifeTime) * time.Second).Unix()
+		logger.Info(fmt.Sprintf("WS broadcast #%d: Stream will be stopped after %d seconds", broadcast.SessionId, lifeTime))
 	}
 
 	var lastActiveTime int64 = 0
 	if activeTime > 0 {
 		lastActiveTime = time.Now().Add(time.Duration(activeTime) * time.Second).Unix()
+		logger.Info(fmt.Sprintf("WS broadcast #%d: When there will not be any users, stream will be stopped after %d seconds", broadcast.SessionId, lifeTime))
 	}
 
 	broadcastTimer := &BroadcastTimer{
@@ -389,6 +397,9 @@ func (controlServer *HttpControlServer) AddWsBroadcast(remoteRtspAddress string,
 	controlServer.Unlock()
 
 	broadcast.OnStopListeners[0] = func(broadcast *rtsp_to_ws.Broadcast) {
+		if !proxyExist {
+			rtspClient.Disconnect()
+		}
 		controlServer.Lock()
 		delete(controlServer.WsBroadcasts, broadcast.SessionId)
 		delete(controlServer.broadcastByRemoteAddress, remoteRtspAddress)
@@ -408,6 +419,7 @@ func (controlServer *HttpControlServer) WsBroadcastList() []*BroadcastJson {
 		broadcastJson.RemoteAddress = broadcast.RtspClient.RemoteAddress
 		broadcastJson.LocalAddress = broadcast.Path
 		broadcastJson.Clients = len(broadcast.Clients)
+		broadcastJson.Uptime = broadcast.GetUptime()
 
 		broadcasts = append(broadcasts, broadcastJson)
 	}

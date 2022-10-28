@@ -2,7 +2,6 @@ package ws_server
 
 import (
 	"fmt"
-	"github.com/gorilla/websocket"
 	"math/rand"
 	"net"
 	"net/http"
@@ -11,6 +10,8 @@ import (
 	"sync"
 	"vrt/logger"
 	"vrt/ws/ws_client"
+
+	"github.com/gorilla/websocket"
 )
 
 type WSServer struct {
@@ -41,7 +42,7 @@ func Create() *WSServer {
 	return server
 }
 
-func (server *WSServer) Start(path string, ip string, port int) error {
+func (server *WSServer) Start(path string, ip string, port int, certPath string, privateKeyPath string) error {
 	if path != "" {
 		server.HttpHandler.HandleFunc(path, server.UpgradeToWebsocket)
 	}
@@ -66,7 +67,23 @@ func (server *WSServer) Start(path string, ip string, port int) error {
 	server.HttpTcpHandler = socket
 
 	//server.HttpServer.Addr = fmt.Sprintf("%s:%d", ip, port)
-	go server.HttpServer.Serve(socket)
+	if certPath != "" && privateKeyPath != "" {
+		go func() {
+			err = server.HttpServer.ServeTLS(socket, certPath, privateKeyPath)
+			if err != nil {
+				logger.Error(err.Error())
+				server.Stop()
+			}
+		}()
+	} else {
+		go func() {
+			err = server.HttpServer.Serve(socket)
+			if err != nil {
+				logger.Error(err.Error())
+				server.Stop()
+			}
+		}()
+	}
 
 	server.IsRunning = true
 
@@ -76,6 +93,9 @@ func (server *WSServer) Start(path string, ip string, port int) error {
 }
 
 func (server *WSServer) Stop() error {
+	if !server.IsRunning {
+		return nil
+	}
 	server.IsRunning = false
 
 	for _, client := range server.Clients {

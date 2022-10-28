@@ -3,11 +3,6 @@ package rtsp_to_ws
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/deepch/vdk/av"
-	"github.com/deepch/vdk/codec/aacparser"
-	"github.com/deepch/vdk/codec/h264parser"
-	"github.com/deepch/vdk/format/mp4f"
-	"github.com/gorilla/websocket"
 	"math"
 	"math/rand"
 	"sync"
@@ -16,6 +11,12 @@ import (
 	"vrt/rtsp/rtsp_client"
 	"vrt/ws/ws_client"
 	"vrt/ws/ws_server"
+
+	"github.com/deepch/vdk/av"
+	"github.com/deepch/vdk/codec/aacparser"
+	"github.com/deepch/vdk/codec/h264parser"
+	"github.com/deepch/vdk/format/mp4f"
+	"github.com/gorilla/websocket"
 )
 
 type OnStopCallback func(broadcast *Broadcast)
@@ -32,6 +33,7 @@ type Broadcast struct {
 	Path              string
 	OnStopListeners   map[int32]OnStopCallback
 	Muxers            map[int32]*mp4f.Muxer
+	startTime         int64
 }
 
 func NewBroadcast() *Broadcast {
@@ -51,6 +53,7 @@ func (broadcast *Broadcast) BroadcastRtspClientToWebsockets(path string, rtspCli
 	broadcast.IsRunning = true
 	broadcast.RtspClient = rtspClient
 	broadcast.wsServer = wsServer
+	broadcast.startTime = time.Now().Unix()
 
 	wsServer.HttpHandler.HandleFunc(path, wsServer.UpgradeToWebsocket)
 
@@ -443,6 +446,10 @@ func RtpDemux(rtspClient *rtsp_client.RtspClient, payloadRAW *[]byte) ([]*av.Pac
 		//client.Println("Unsuported Intervaled data packet", int(content[1]), content[offset:end])
 	}
 	return nil, false
+}
+
+func (broadcast *Broadcast) GetUptime() int64 {
+	return time.Now().Unix() - broadcast.startTime
 }
 
 func int16ToBytes(val int) []byte {
