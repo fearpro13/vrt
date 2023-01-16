@@ -4,36 +4,35 @@ Video re-transmitter
 
 RTSP proxy + Rtsp to WebSocket + Http control mode
 
-# Cборка
+# Build App
 #### go build < buildOutputDir >
 
-# Запуск
-## Программа запускается с 1-м аргументом
+# Launch
+## Program requires 1 argument to start(in combined mode this argument is ignored, so if you are going to use combined mode, you can just type any single char to bypass args check)
 
-## 1 - адрес удалённого rtsp сервера
-    например rtsp://username:password@127.0.0.1:554/?trackID=1
+## 1 - remote rtsp address
+    example: rtsp://username:password@127.0.0.1:554/?trackID=1
 
-# Допустимые параметры для запуска:
+# Possible options for launch:
 
-## Программу возможно запустить в одном из 3-х режимов:
--p - RTSP прокси
+## Program could be started in one of three available modes:
+-p - RTSP proxy
 
--w - трансляция RTSP через websocket(fMP4)
+-w - video translation through websocket(fMP4)
 
--h - комбинированный режим работы, с управлением через HTTP API
+-h - combined mode with control by HTTP API
 
-В случае запуска в комбинированном режиме, используемые параметры для запуска программы могут игнорироваться, т.к
-добавление новых RTSP ресурсов осуществляется уже через HTTP API.
-При подключении к удалённому RTSP ресурсу используется TCP протокол!(вот такой вот недочёт)
+In case of combined mode, some of program options might be ignored as further adding of rtsp remote sources is done through HTTP API.
+Each newly added rtsp remote source in combined mode is connected via TCP(known bug, UDP is implemented, but not wired with HTTP API)
 
-## У каждого из режимов доступен дополнительный параметр - порт. Для выбора порта системой(автоматически) необходимо указать 0
- -p:p - локальный порт RTSP прокси
+## Each mode has additional option - local port. If you are going to use port choosen by system - set option value to 0.
+ -p:p - local RTSP proxy port
 
- -w:p - локальный порт Websocket трансляции
+ -w:p - local websocket translation port
 
- -h:p - локальный порт HTTP сервера для комбинированного режима
+ -h:p - local HTTP port for combined mode
 
-## -v - уровень логирования
+## -v - Verbosity level (number)
     JUNK 0
 
     DEBUG 1
@@ -50,14 +49,14 @@ RTSP proxy + Rtsp to WebSocket + Http control mode
 
     EMERGENCY 7
 
-## -t - протокол для подключения к удалённому rtsp ресурсу
+## -t - underlying protocol, used for remote RTSP connections(ignored in combined mode)
     tcp
 
     udp
 
-## Для комбинированного режима доступно следующее HTTP API
+## Available HTTP API for combined mode:
 
-### Добавление RTSP прокси
+### Add rtsp proxy
 POST, JSON /add_proxy
 
 {
@@ -68,9 +67,9 @@ POST, JSON /add_proxy
 
 }
 
-local_port - локальный порт, для RTSP прокси. 0 - порт выбирается системой
+local_port - local Rtsp proxy port, for system auto-selected port put 0
 
-### Остановка RTSP прокси
+### Stop Rtsp proxy
 POST,JSON /stop_proxy
 
 {
@@ -80,11 +79,11 @@ POST,JSON /stop_proxy
 }
 
 
-### Получение списка активных RTSP прокси
+### Get list of available Rtsp proxies
 GET /proxy_list
 
 
-### Добавление websocket трансляции
+### Add websocket video translation
 POST, JSON /add_broadcast`
 
 {
@@ -97,11 +96,11 @@ POST, JSON /add_broadcast`
 
 }
 
-websocket_stream_lifetime - общее время длительности трансляции в секундах, после окончания этого времени - websocket трансляция завершается. 0 - без ограничений
+websocket_stream_lifetime - total duration of websocket translation(seconds). Once this parameter becomes greater than application running time - translation stops. Put 0 to avoid this limitation.
 
-websocket_stream_active_time - время длительности трансляции в секундах, по истечению которого трансляция завершается, если она совсем не используется(нет ни одного подключенного пользователя). 0 - без ограничений
+websocket_stream_active_time - If translation does not have any clients connected for this period of time - translation will be stopped. Put 0 to avoid this limitation.
 
-### Остановка websocket трансляции
+### Stop websocket translation
 POST, JSON /stop_broadcast
 
 {
@@ -110,22 +109,22 @@ POST, JSON /stop_broadcast
 
 }
 
-### Получение списка websocket трансляций
+### Get list of available websocket translations
 GET /broadcast_list
 
 
 
-#### Пример запуска RTSP прокси с уровнем логирования INFO на порту 6060, подключение к удалённому ресурсу TCP
+#### Example - starting in rtsp proxy mode with verbosity level INFO on local port 6060, remote rtsp connections use TCP protocol
 #### vrt rtsp://username:password@127.0.0.1:554/?trackID=1 -p:p 6060 -v 2 -t tcp
 
-#### Пример запуска трансляции через websocket с уровнем логирования INFO на порту 6060, подключение к удалённому ресурсу UDP
+#### Example - starting in websocket translation mode with verbosity level INFO on local port 6060, remote rtsp connections use UDP protocol
 #### vrt rtsp://username:password@127.0.0.1:554/?trackID=1 -w:p 6060 -v 2 -t udp
 
-#### Пример запуска комбинированного режима с уровнем логирования INFO на порту 6060
+#### Example - starting in combined mode with verbosity level INFO on local port 6060
 #### vrt rtsp://username:password@127.0.0.1:554/?trackID=1 -h:p 6060 -v 2
 
 
-#Примеры использования комбинированного режима можно найти в проекте. Директория /web
+#Examples of using program in combined mode could be found in /web folder.
 
 
 
