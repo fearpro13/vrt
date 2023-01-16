@@ -4,6 +4,9 @@ Video re-transmitter
 
 RTSP proxy + Rtsp to WebSocket + Http control mode
 
+## Made for education and testing purposes.
+## DO NOT USE AT PRODUCTION ENVIRONMENT
+
 # Build App
 #### go build < buildOutputDir >
 
